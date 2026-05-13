@@ -3618,7 +3618,7 @@ func _create_ui() -> void:
 	var hero_block: Control = Control.new()
 	hero_block.name = "HeroBlock"
 	hero_block.position = Vector2(10, 155)  # Ajusté pour être juste sous la minimap (10 + 133 + 12)
-	hero_block.size = Vector2(200, 180)
+	hero_block.size = Vector2(200, 200)  # Augmenté la hauteur pour plus d'espace
 	side_panel.add_child(hero_block)
 
 	# Portrait (style cadre doré HoMM3)
@@ -3668,8 +3668,8 @@ func _create_ui() -> void:
 
 	# Stats à droite du portrait
 	var stats_vbox: VBoxContainer = VBoxContainer.new()
-	stats_vbox.position = Vector2(80, 5)
-	stats_vbox.size = Vector2(110, 160)
+	stats_vbox.position = Vector2(75, 5)
+	stats_vbox.size = Vector2(115, 180)  # Augmenté la hauteur
 	stats_vbox.add_theme_constant_override("separation", 4)
 	hero_block.add_child(stats_vbox)
 
@@ -3690,7 +3690,7 @@ func _create_ui() -> void:
 
 	# Barre XP
 	var xp_panel = Panel.new()
-	xp_panel.custom_minimum_size = Vector2(170, 22)
+	xp_panel.custom_minimum_size = Vector2(110, 20)
 	var xp_style = StyleBoxFlat.new()
 	xp_style.bg_color = Color(0.08, 0.06, 0.04)
 	xp_style.corner_radius_top_left = 8
@@ -3701,20 +3701,20 @@ func _create_ui() -> void:
 	stats_vbox.add_child(xp_panel)
 
 	_xp_bar_bg = ColorRect.new()
-	_xp_bar_bg.position = Vector2(4, 4)
-	_xp_bar_bg.size = Vector2(162, 14)
+	_xp_bar_bg.position = Vector2(3, 3)
+	_xp_bar_bg.size = Vector2(104, 14)
 	_xp_bar_bg.color = Color(0.15, 0.12, 0.08)
 	xp_panel.add_child(_xp_bar_bg)
 
 	_xp_bar_fill = ColorRect.new()
-	_xp_bar_fill.position = Vector2(4, 4)
-	_xp_bar_fill.size = Vector2(162 * float(_hero_xp) / _hero_xp_to_next, 14)
+	_xp_bar_fill.position = Vector2(3, 3)
+	_xp_bar_fill.size = Vector2(104 * float(_hero_xp) / _hero_xp_to_next, 14)
 	_xp_bar_fill.color = Color(0.85, 0.65, 0.15)
 	xp_panel.add_child(_xp_bar_fill)
 
 	_label_xp = Label.new()
 	_label_xp.position = Vector2(0, -2)
-	_label_xp.size = Vector2(170, 22)
+	_label_xp.size = Vector2(110, 20)
 	_label_xp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_label_xp.text = "%d / %d XP" % [_hero_xp, _hero_xp_to_next]
 	_label_xp.add_theme_font_size_override("font_size", 10)
@@ -3723,7 +3723,7 @@ func _create_ui() -> void:
 
 	# --- BARRE DE HP ---
 	var hp_panel = Panel.new()
-	hp_panel.custom_minimum_size = Vector2(170, 22)
+	hp_panel.custom_minimum_size = Vector2(110, 20)
 	var hp_style = StyleBoxFlat.new()
 	hp_style.bg_color = Color(0.08, 0.06, 0.04)
 	hp_style.corner_radius_top_left = 8
@@ -3734,15 +3734,15 @@ func _create_ui() -> void:
 	stats_vbox.add_child(hp_panel)
 
 	_hp_bar_bg = ColorRect.new()
-	_hp_bar_bg.position = Vector2(4, 4)
-	_hp_bar_bg.size = Vector2(162, 14)
+	_hp_bar_bg.position = Vector2(3, 3)
+	_hp_bar_bg.size = Vector2(104, 14)
 	_hp_bar_bg.color = Color(0.15, 0.08, 0.08)
 	hp_panel.add_child(_hp_bar_bg)
 
 	_hp_bar_fill = ColorRect.new()
-	_hp_bar_fill.position = Vector2(4, 4)
+	_hp_bar_fill.position = Vector2(3, 3)
 	var hp_ratio = float(_hero_hp) / _hero_max_hp if _hero_max_hp > 0 else 0
-	_hp_bar_fill.size = Vector2(162 * hp_ratio, 14)
+	_hp_bar_fill.size = Vector2(104 * hp_ratio, 14)
 	if hp_ratio > 0.5:
 		_hp_bar_fill.color = Color(0.2, 0.7, 0.25)
 	elif hp_ratio > 0.25:
@@ -3753,7 +3753,7 @@ func _create_ui() -> void:
 
 	_label_hp = Label.new()
 	_label_hp.position = Vector2(0, -2)
-	_label_hp.size = Vector2(170, 22)
+	_label_hp.size = Vector2(110, 20)
 	_label_hp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_label_hp.text = "HP %d / %d" % [_hero_hp, _hero_max_hp]
 	_label_hp.add_theme_font_size_override("font_size", 10)
@@ -3828,13 +3828,13 @@ func _create_ui() -> void:
 	mp_row.add_child(mp_label)
 	stats_vbox.add_child(mp_row)
 
-	# --- DATE DU JEU (sous les stats) ---
-	var date_panel: Panel = _create_decorated_panel(Vector2(180, 40))
-	date_panel.position = Vector2(0, 120)
-	hero_block.add_child(date_panel)
+	# --- DATE DU JEU (sous les stats, dans le side_panel) ---
+	var date_panel: Panel = _create_decorated_panel(Vector2(180, 35))
+	date_panel.position = Vector2(20, 375)  # Positionné juste sous le hero_block (155 + 200 + 20)
+	side_panel.add_child(date_panel)
 	_label_date = Label.new()
 	_label_date.text = "Month %d  Week %d  Day %d" % [_game_month, _game_week, _game_day]
-	_label_date.size = Vector2(170, 30)
+	_label_date.size = Vector2(170, 25)
 	_label_date.position = Vector2(5, 5)
 	_label_date.add_theme_color_override("font_color", Color(0.9, 0.8, 0.5))
 	_label_date.add_theme_font_size_override("font_size", 11)
@@ -3843,7 +3843,7 @@ func _create_ui() -> void:
 
 	# --- BOUTON FIN DE TOUR ---
 	var btn_panel: Panel = _create_decorated_panel(Vector2(180, 50))
-	btn_panel.position = Vector2(20, 655)  # Ajusté pour ne pas dépasser du panneau
+	btn_panel.position = Vector2(20, 620)  # Remonté pour réduire l'espace vide
 	side_panel.add_child(btn_panel)
 	var btn_end_turn: Button = Button.new()
 	btn_end_turn.text = "FIN DE TOUR"
