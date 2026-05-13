@@ -10,16 +10,22 @@ config_version=5
 
 [application]
 
-config/name="homm-mobile"
-run/main_scene="res://scenes/tile_map_world.tscn"
-config/features=PackedStringArray("4.6", "Mobile")
-config/icon="res://icon.svg"
+config/name="HoMM Mobile"
+config/description="Heroes of Might and Mobile - Jeu de stratégie au tour par tour"
+config/version="1.0.0"
+run/main_scene="res://scenes/main_menu.tscn"
+config/features=PackedStringArray("4.6")
 
-[physics]
+[display]
 
-3d/physics_engine="Jolt Physics"
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[autoload]
+
+GameData="*res://scripts/game_data.gd"
 
 [rendering]
 
-rendering_device/driver.windows="d3d12"
-renderer/rendering_method="mobile"
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

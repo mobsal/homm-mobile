@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://gbwgses0fmj5"]
+
+[ext_resource type="Script" uid="uid://bkfe5oeshjiyw" path="res://scripts/tile_map_world.gd" id="1"]
+
+[node name="TileMapWorld" type="Node2D" unique_id=1717561072]
+script = ExtResource("1")

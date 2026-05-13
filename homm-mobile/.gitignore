@@ -1,3 +1,10 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Fichiers volumineux et assets externes
+temp_data/
+*.lod
+*.bin
+mmarch.exe
+lodextract/
