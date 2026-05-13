@@ -1587,7 +1587,6 @@ func _ready() -> void:
 	_init_fog_of_war()
 	_init_enemy_armies()
 	_update_fog_of_war()
-	_create_end_turn_button()
 	
 	# === INITIALISATION COMBAT MANAGER ===
 	var combat_scene := preload("res://scenes/combat_manager.tscn")
@@ -3356,7 +3355,9 @@ func _start_combat(enemy_index: int) -> void:
 	
 	# Lancer le Combat Manager
 	if _combat_manager:
-		_combat_manager.start_combat(_hero_army, enemy_army, enemy_index)
+		var hero_data: Dictionary = {"units": _hero_army}
+		var enemy_data: Dictionary = {"units": enemy_army}
+		_combat_manager.start_combat(hero_data, enemy_data, enemy_index)
 	else:
 		_in_combat = false
 		print("ERREUR: Combat Manager non initialisé !")
@@ -3616,7 +3617,7 @@ func _create_ui() -> void:
 	# --- PORTRAIT + STATS HÉROS (sous la minimap) ---
 	var hero_block: Control = Control.new()
 	hero_block.name = "HeroBlock"
-	hero_block.position = Vector2(10, 220)
+	hero_block.position = Vector2(10, 155)  # Ajusté pour être juste sous la minimap (10 + 133 + 12)
 	hero_block.size = Vector2(200, 180)
 	side_panel.add_child(hero_block)
 
@@ -3817,6 +3818,16 @@ func _create_ui() -> void:
 	ore_row.add_child(_resource_ore_label)
 	stats_vbox.add_child(ore_row)
 
+	# --- MP (Mouvement) ---
+	var mp_row = HBoxContainer.new()
+	mp_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	var mp_label = Label.new()
+	mp_label.text = "MP %d / %d" % [_hero_mp, _hero_max_mp]
+	mp_label.add_theme_color_override("font_color", Color(0.2, 0.9, 0.4))
+	mp_label.add_theme_font_size_override("font_size", 12)
+	mp_row.add_child(mp_label)
+	stats_vbox.add_child(mp_row)
+
 	# --- DATE DU JEU (sous les stats) ---
 	var date_panel: Panel = _create_decorated_panel(Vector2(180, 40))
 	date_panel.position = Vector2(0, 120)
@@ -3832,7 +3843,7 @@ func _create_ui() -> void:
 
 	# --- BOUTON FIN DE TOUR ---
 	var btn_panel: Panel = _create_decorated_panel(Vector2(180, 50))
-	btn_panel.position = Vector2(20, 660)
+	btn_panel.position = Vector2(20, 655)  # Ajusté pour ne pas dépasser du panneau
 	side_panel.add_child(btn_panel)
 	var btn_end_turn: Button = Button.new()
 	btn_end_turn.text = "FIN DE TOUR"
@@ -4404,8 +4415,8 @@ func _create_resources() -> void:
 
 func _create_minimap(parent: Control) -> void:
 	# Conteneur avec cadre doré - ratio 60:40 pour correspondre à toute la map
-	var minimap_width: float = 300.0  # Grande minimap pour voir toute la map 60×40
-	var minimap_height: float = minimap_width * float(_zone_h) / float(_zone_w)  # 300 * 40/60 = 200
+	var minimap_width: float = 200.0  # Ajusté pour rentrer dans le panneau latéral de 220px
+	var minimap_height: float = minimap_width * float(_zone_h) / float(_zone_w)  # 200 * 40/60 = 133
 	
 	var container: Panel = Panel.new()
 	container.name = "MinimapContainer"
@@ -4495,7 +4506,7 @@ func _update_minimap() -> void:
 	var hero_y: float = _hero.position.y
 	
 	# Recalculer le scale comme dans _create_minimap
-	var minimap_width: float = 300.0
+	var minimap_width: float = 200.0  # Ajusté pour correspondre à la nouvelle taille
 	var minimap_height: float = minimap_width * float(_zone_h) / float(_zone_w)
 	var scale_x: float = (minimap_width - 6) / float(_zone_w * TILE_SIZE)
 	var scale_y: float = (minimap_height - 6) / float(_zone_h * TILE_SIZE)

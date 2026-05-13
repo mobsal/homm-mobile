@@ -37,6 +37,7 @@ var _selected_target: int = -1
 # Données du joueur
 var _hero_data: Dictionary = {}
 var _enemy_data: Dictionary = {}
+var _enemy_index: int = -1
 
 # Styles enrichis
 var _top_bar_style: StyleBoxFlat
@@ -369,9 +370,10 @@ func _add_action_button(text: String, callback: Callable, accent_color: Color) -
 # COMBAT LOGIC
 # ============================================
 
-func start_combat(hero_data: Dictionary, enemy_data: Dictionary) -> void:
+func start_combat(hero_data: Dictionary, enemy_data: Dictionary, enemy_index: int = -1) -> void:
 	_hero_data = hero_data
 	_enemy_data = enemy_data
+	_enemy_index = enemy_index
 	_hero_units = hero_data.get("units", []).duplicate(true)
 	_enemy_units = enemy_data.get("units", []).duplicate(true)
 	_current_turn = 0
