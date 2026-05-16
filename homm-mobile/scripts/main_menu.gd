@@ -27,7 +27,7 @@ func _ready() -> void:
 
 	# Titre principal
 	_title_label = Label.new()
-	_title_label.text = "HEROES"
+	_title_label.text = "HOMURA"
 	_title_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_title_label.position = Vector2(0, 80)
 	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -36,7 +36,7 @@ func _ready() -> void:
 	add_child(_title_label)
 
 	_subtitle_label = Label.new()
-	_subtitle_label.text = "of Might & Magic"
+	_subtitle_label.text = "Heroes of Conquest"
 	_subtitle_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_subtitle_label.position = Vector2(0, 140)
 	_subtitle_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

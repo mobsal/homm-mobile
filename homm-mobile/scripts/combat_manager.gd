@@ -25,6 +25,10 @@ var _result_title: Label
 var _result_desc: RichTextLabel
 var _result_button: Button
 var _enemy_target_label: Label
+var _spell_panel: Panel
+var _spell_buttons: Array = []
+var _defense_indicator: Label
+var _rage_indicator: Label
 
 # Données de combat
 var _hero_units: Array = []
@@ -33,6 +37,8 @@ var _current_turn: int = 0  # 0 = héros, 1 = ennemi
 var _round_count: int = 1
 var _in_combat: bool = false
 var _selected_target: int = -1
+var _hero_defending: bool = false  # Bonus de défense actif
+var _hero_attack_buff: bool = false  # Bonus d'attaque actif
 
 # Données du joueur
 var _hero_data: Dictionary = {}
@@ -254,6 +260,26 @@ func _setup_ui() -> void:
 	_enemy_target_label.add_theme_font_size_override("font_size", 14)
 	_combat_panel.add_child(_enemy_target_label)
 
+	# Indicateur de défense
+	_defense_indicator = Label.new()
+	_defense_indicator.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_defense_indicator.position = Vector2(40, -80)
+	_defense_indicator.text = "🛡️ DÉFENSE ACTIVE"
+	_defense_indicator.add_theme_color_override("font_color", Color(0.3, 0.8, 0.9))
+	_defense_indicator.add_theme_font_size_override("font_size", 16)
+	_defense_indicator.visible = false
+	_combat_panel.add_child(_defense_indicator)
+
+	# Indicateur de rage
+	_rage_indicator = Label.new()
+	_rage_indicator.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_rage_indicator.position = Vector2(40, -60)
+	_rage_indicator.text = "⚔️ FUREUR ACTIVE"
+	_rage_indicator.add_theme_color_override("font_color", Color(0.95, 0.5, 0.1))
+	_rage_indicator.add_theme_font_size_override("font_size", 16)
+	_rage_indicator.visible = false
+	_combat_panel.add_child(_rage_indicator)
+
 	# Conteneur héros (gauche)
 	_hero_container = HBoxContainer.new()
 	_hero_container.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
@@ -319,6 +345,49 @@ func _setup_ui() -> void:
 	_result_panel.add_theme_stylebox_override("panel", _result_panel_style)
 	_combat_panel.add_child(_result_panel)
 
+	# Panel de sélection de sorts
+	_spell_panel = Panel.new()
+	_spell_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_spell_panel.custom_minimum_size = Vector2(380, 200)
+	_spell_panel.visible = false
+	var spell_style = StyleBoxFlat.new()
+	spell_style.bg_color = Color(0.08, 0.06, 0.04, 0.95)
+	spell_style.border_color = Color(0.55, 0.18, 0.65)
+	spell_style.border_width_left = 3
+	spell_style.border_width_right = 3
+	spell_style.border_width_top = 3
+	spell_style.border_width_bottom = 3
+	spell_style.corner_radius_top_left = 12
+	spell_style.corner_radius_top_right = 12
+	spell_style.corner_radius_bottom_left = 12
+	spell_style.corner_radius_bottom_right = 12
+	_spell_panel.add_theme_stylebox_override("panel", spell_style)
+	_combat_panel.add_child(_spell_panel)
+
+	# Titre panel sorts
+	var spell_title = Label.new()
+	spell_title.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	spell_title.position = Vector2(0, 15)
+	spell_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	spell_title.text = "Choisir un sort"
+	spell_title.add_theme_font_size_override("font_size", 20)
+	spell_title.add_theme_color_override("font_color", Color(0.85, 0.5, 0.95))
+	_spell_panel.add_child(spell_title)
+
+	# Boutons de sorts
+	var spell_container = HBoxContainer.new()
+	spell_container.set_anchors_preset(Control.PRESET_CENTER)
+	spell_container.position = Vector2(-150, 50)
+	spell_container.custom_minimum_size = Vector2(300, 100)
+	spell_container.alignment = BoxContainer.ALIGNMENT_CENTER
+	spell_container.add_theme_constant_override("separation", 15)
+	_spell_panel.add_child(spell_container)
+
+	_add_spell_button("Boule de Feu", Color(0.95, 0.35, 0.15), "fireball", spell_container)
+	_add_spell_button("Éclair", Color(0.65, 0.75, 0.95), "lightning", spell_container)
+	_add_spell_button("Soin", Color(0.25, 0.75, 0.35), "heal", spell_container)
+	_add_spell_button("Fureur", Color(0.95, 0.65, 0.15), "rage", spell_container)
+
 	# Titre résultat
 	_result_title = Label.new()
 	_result_title.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -366,6 +435,28 @@ func _add_action_button(text: String, callback: Callable, accent_color: Color) -
 	btn.pressed.connect(callback)
 	_action_bar.add_child(btn)
 
+func _add_spell_button(text: String, accent_color: Color, spell_type: String, container: HBoxContainer) -> void:
+	var btn = Button.new()
+	btn.text = text
+	btn.custom_minimum_size = Vector2(70, 80)
+	btn.add_theme_font_size_override("font_size", 11)
+	btn.add_theme_color_override("font_color", Color(0.9, 0.9, 0.85))
+	var spell_normal = StyleBoxFlat.new()
+	spell_normal.bg_color = accent_color.darkened(0.4)
+	spell_normal.border_color = accent_color
+	spell_normal.border_width_left = 2
+	spell_normal.border_width_right = 2
+	spell_normal.border_width_top = 2
+	spell_normal.border_width_bottom = 2
+	spell_normal.corner_radius_top_left = 8
+	spell_normal.corner_radius_top_right = 8
+	spell_normal.corner_radius_bottom_left = 8
+	spell_normal.corner_radius_bottom_right = 8
+	btn.add_theme_stylebox_override("normal", spell_normal)
+	btn.pressed.connect(func(): _on_spell_selected(spell_type))
+	container.add_child(btn)
+	_spell_buttons.append(btn)
+
 # ============================================
 # COMBAT LOGIC
 # ============================================
@@ -380,6 +471,8 @@ func start_combat(hero_data: Dictionary, enemy_data: Dictionary, enemy_index: in
 	_round_count = 1
 	_in_combat = true
 	_selected_target = -1
+	_hero_defending = false  # Reset defense bonus
+	_hero_attack_buff = false  # Reset attack bonus
 
 	_combat_title.text = "COMBAT"
 	_round_label.text = "Round 1"
@@ -387,6 +480,8 @@ func start_combat(hero_data: Dictionary, enemy_data: Dictionary, enemy_index: in
 	_combat_log.clear()
 	_result_panel.visible = false
 	_action_bar.visible = true
+	_defense_indicator.visible = false
+	_rage_indicator.visible = false
 
 	_update_unit_displays()
 	_log_message("[color=#6ec3e0]Le combat commence![/color]")
@@ -447,14 +542,143 @@ func _on_attack_pressed() -> void:
 func _on_defend_pressed() -> void:
 	if not _in_combat or _current_turn != 0:
 		return
-	_log_message("[color=#5a9eb8]Vous prenez une position defensive.[/color]")
+	_hero_defending = true
+	_defense_indicator.visible = true
+	_log_message("[color=#5a9eb8]Vous prenez une position defensive. (+50% defense)[/color]")
 	_process_next_turn()
 
 func _on_magic_pressed() -> void:
 	if not _in_combat or _current_turn != 0:
 		return
-	_log_message("[color=#9b5ab8]Vous lancez un sort![/color]")
-	_process_hero_attack(true)
+	_spell_panel.visible = true
+	_spell_panel.modulate.a = 0.0
+	_spell_panel.scale = Vector2(0.8, 0.8)
+	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(_spell_panel, "modulate:a", 1.0, 0.3)
+	tween.parallel().tween_property(_spell_panel, "scale", Vector2(1.0, 1.0), 0.3)
+
+func _on_spell_selected(spell_type: String) -> void:
+	_spell_panel.visible = false
+	_cast_spell(spell_type)
+
+func _cast_spell(spell_type: String) -> void:
+	match spell_type:
+		"fireball":
+			_cast_fireball()
+		"lightning":
+			_cast_lightning()
+		"heal":
+			_cast_heal()
+		"rage":
+			_cast_rage()
+
+func _cast_fireball() -> void:
+	if _enemy_units.is_empty():
+		_end_combat(true)
+		return
+	
+	var attacker = _hero_units[0] if not _hero_units.is_empty() else {"magic": 15, "name": "Heros"}
+	var base_damage = attacker.get("magic", 15)
+	
+	_log_message("[color=#ff5522]Vous lancez Boule de Feu![/color]")
+	_flash_screen(Color(1.0, 0.4, 0.1), 0.2)
+	
+	var total_damage = 0
+	for i in range(_enemy_units.size() - 1, -1, -1):
+		var target = _enemy_units[i]
+		var magic_res = target.get("magic_res", 2)
+		var damage = max(1, int((base_damage - magic_res) * randf_range(0.9, 1.1)))
+		target["hp"] = max(0, target["hp"] - damage)
+		total_damage += damage
+		
+		_show_damage_number(_enemy_container.get_child(i), damage, true)
+		
+		if target["hp"] <= 0:
+			_log_message("[color=#ff4444]" + target.get("name", "Ennemi") + " est brûlé vif![/color]")
+			_enemy_units.remove_at(i)
+	
+	_log_message("[color=#ff5522]Boule de Feu inflige [color=#ff4444]" + str(total_damage) + "[/color] dégâts totaux![/color]")
+	_shake_panel(5.0, 0.3)
+	_update_unit_displays()
+	
+	if _enemy_units.is_empty():
+		_end_combat(true)
+		return
+	
+	_process_next_turn()
+
+func _cast_lightning() -> void:
+	if _enemy_units.is_empty():
+		_end_combat(true)
+		return
+	
+	var target_idx = _selected_target
+	if target_idx < 0 or target_idx >= _enemy_units.size() or _enemy_units[target_idx].get("hp", 0) <= 0:
+		target_idx = _find_first_alive_unit(_enemy_units)
+		if target_idx < 0:
+			_end_combat(true)
+			return
+	
+	var attacker = _hero_units[0] if not _hero_units.is_empty() else {"magic": 20, "name": "Heros"}
+	var target = _enemy_units[target_idx]
+	var base_damage = attacker.get("magic", 20)
+	var magic_res = target.get("magic_res", 2)
+	var damage = max(1, int((base_damage - magic_res) * randf_range(1.2, 1.5)))  # Higher damage
+	
+	target["hp"] = max(0, target["hp"] - damage)
+	
+	_log_message("[color=#5588ff]Vous lancez Éclair sur " + target.get("name", "Ennemi") + "![/color]")
+	_log_message("[color=#5588ff]Éclair inflige [color=#ff4444]" + str(damage) + "[/color] dégâts![/color]")
+	_flash_screen(Color(0.6, 0.8, 1.0), 0.15)
+	_shake_panel(6.0, 0.25)
+	_animate_unit_card_hit(_enemy_container.get_child(target_idx))
+	_show_damage_number(_enemy_container.get_child(target_idx), damage, true)
+	_animate_attack_projectile(_hero_container.get_child(0), _enemy_container.get_child(target_idx), true)
+	_update_unit_displays()
+	
+	if target["hp"] <= 0:
+		_log_message("[color=#ff4444]" + target.get("name", "Ennemi") + " est électrocuté![/color]")
+		_enemy_units.remove_at(target_idx)
+		
+		if _enemy_units.is_empty():
+			_end_combat(true)
+			return
+	
+	_process_next_turn()
+
+func _cast_heal() -> void:
+	if _hero_units.is_empty():
+		_end_combat(false)
+		return
+	
+	var healer = _hero_units[0] if not _hero_units.is_empty() else {"magic": 12, "name": "Heros"}
+	var heal_power = healer.get("magic", 12)
+	
+	_log_message("[color=#22aa44]Vous lancez Soin![/color]")
+	_flash_screen(Color(0.3, 0.9, 0.4), 0.2)
+	
+	var total_healed = 0
+	for i in range(_hero_units.size()):
+		var unit = _hero_units[i]
+		var max_hp = unit.get("max_hp", unit.get("hp", 1))
+		var current_hp = unit.get("hp", 0)
+		var heal_amount = min(heal_power, max_hp - current_hp)
+		unit["hp"] = min(max_hp, current_hp + heal_amount)
+		total_healed += heal_amount
+		
+		if heal_amount > 0:
+			_show_heal_number(_hero_container.get_child(i), heal_amount)
+	
+	_log_message("[color=#22aa44]Soin restaure [color=#44ff66]" + str(total_healed) + "[/color] PV![/color]")
+	_update_unit_displays()
+	_process_next_turn()
+
+func _cast_rage() -> void:
+	_hero_attack_buff = true
+	_rage_indicator.visible = true
+	_log_message("[color=#ff8822]Vous lancez Fureur! (+50% attaque)[/color]")
+	_flash_screen(Color(1.0, 0.5, 0.1), 0.2)
+	_process_next_turn()
 
 func _on_flee_pressed() -> void:
 	if not _in_combat or _current_turn != 0:
@@ -490,6 +714,8 @@ func _process_hero_attack(is_magic: bool = false) -> void:
 	_flash_screen(Color(1.0, 0.3, 0.2), 0.1)
 	_shake_panel(4.0, 0.2)
 	_animate_unit_card_hit(_enemy_container.get_child(target_idx))
+	_show_damage_number(_enemy_container.get_child(target_idx), damage, is_magic)
+	_animate_attack_projectile(_hero_container.get_child(0), _enemy_container.get_child(target_idx), is_magic)
 
 	if target["hp"] <= 0:
 		_log_message("[color=#ff4444]" + target.get("name", "Ennemi") + " est vaincu![/color]")
@@ -498,6 +724,9 @@ func _process_hero_attack(is_magic: bool = false) -> void:
 		if _enemy_units.is_empty():
 			_end_combat(true)
 			return
+
+	# Update HP bars after damage
+	_update_unit_displays()
 
 	_process_next_turn()
 
@@ -510,7 +739,7 @@ func _process_enemy_turn() -> void:
 		return
 
 	var attacker = _enemy_units[0] if not _enemy_units.is_empty() else {"attack": 8, "name": "Ennemi"}
-	var target_idx = _find_first_alive_unit(_hero_units)
+	var target_idx = _select_enemy_target()
 	if target_idx < 0:
 		_end_combat(false)
 		return
@@ -524,6 +753,11 @@ func _process_enemy_turn() -> void:
 	_flash_screen(Color(0.8, 0.1, 0.1), 0.1)
 	_shake_panel(6.0, 0.25)
 	_animate_unit_card_hit(_hero_container.get_child(target_idx))
+	_show_damage_number(_hero_container.get_child(target_idx), damage, false)
+	_animate_attack_projectile(_enemy_container.get_child(0), _hero_container.get_child(target_idx), false)
+	
+	# Update HP bars after damage
+	_update_unit_displays()
 
 	if target["hp"] <= 0:
 		_log_message("[color=#ff4444]" + target.get("name", "Heros") + " est vaincu![/color]")
@@ -535,6 +769,41 @@ func _process_enemy_turn() -> void:
 
 	_process_next_turn()
 
+func _select_enemy_target() -> int:
+	if _hero_units.is_empty():
+		return -1
+	
+	# Different AI strategies based on random chance
+	var strategy = randf()
+	
+	if strategy < 0.4:
+		# Target weakest unit (lowest HP)
+		var weakest_idx = -1
+		var lowest_hp = 999999
+		for i in range(_hero_units.size()):
+			if _hero_units[i].get("hp", 0) > 0 and _hero_units[i].get("hp", 0) < lowest_hp:
+				lowest_hp = _hero_units[i].get("hp", 0)
+				weakest_idx = i
+		return weakest_idx if weakest_idx >= 0 else _find_first_alive_unit(_hero_units)
+	elif strategy < 0.7:
+		# Target strongest unit (highest attack)
+		var strongest_idx = -1
+		var highest_attack = -1
+		for i in range(_hero_units.size()):
+			if _hero_units[i].get("hp", 0) > 0 and _hero_units[i].get("attack", 0) > highest_attack:
+				highest_attack = _hero_units[i].get("attack", 0)
+				strongest_idx = i
+		return strongest_idx if strongest_idx >= 0 else _find_first_alive_unit(_hero_units)
+	else:
+		# Random target
+		var alive_units = []
+		for i in range(_hero_units.size()):
+			if _hero_units[i].get("hp", 0) > 0:
+				alive_units.append(i)
+		if alive_units.is_empty():
+			return -1
+		return alive_units[randi() % alive_units.size()]
+
 func _calculate_damage(attacker: Dictionary, target: Dictionary, is_magic: bool) -> int:
 	var base_dmg = attacker.get("attack", 10)
 	var defense = target.get("defense", 5)
@@ -543,6 +812,14 @@ func _calculate_damage(attacker: Dictionary, target: Dictionary, is_magic: bool)
 	if is_magic:
 		base_dmg = attacker.get("magic", 10)
 		defense = target.get("magic_res", 2)
+	
+	# Apply defense bonus if hero is defending
+	if _hero_defending and not is_magic:
+		defense = int(defense * 1.5)  # 50% defense bonus
+	
+	# Apply attack buff if hero has rage
+	if _hero_attack_buff and not is_magic:
+		base_dmg = int(base_dmg * 1.5)  # 50% attack bonus
 
 	var damage = max(1, int((base_dmg - defense) * random_factor))
 	return damage
@@ -562,6 +839,10 @@ func _process_next_turn() -> void:
 		_turn_label.text = "Votre tour"
 		_turn_label.add_theme_color_override("font_color", Color(0.3, 0.7, 0.9))
 		_action_bar.visible = true
+		_hero_defending = false  # Reset defense bonus at start of hero turn
+		_hero_attack_buff = false  # Reset attack buff at start of hero turn
+		_defense_indicator.visible = false  # Hide defense indicator
+		_rage_indicator.visible = false  # Hide rage indicator
 	else:
 		_turn_label.text = "Tour ennemi"
 		_turn_label.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
@@ -734,3 +1015,62 @@ func _animate_unit_card_hit(card: Control) -> void:
 	var tween = create_tween().set_ease(Tween.EASE_OUT)
 	tween.tween_property(card, "modulate", Color(1.0, 0.3, 0.3), 0.05)
 	tween.tween_property(card, "modulate", Color(1.0, 1.0, 1.0), 0.2)
+
+func _show_damage_number(card: Control, damage: int, is_magic: bool) -> void:
+	if not card:
+		return
+	
+	var damage_label = Label.new()
+	damage_label.text = "-" + str(damage)
+	damage_label.add_theme_font_size_override("font_size", 24)
+	if is_magic:
+		damage_label.add_theme_color_override("font_color", Color(0.6, 0.4, 1.0))
+	else:
+		damage_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.2))
+	
+	var card_global_pos = card.global_position
+	damage_label.position = card_global_pos + Vector2(card.size.x / 2 - 20, card.size.y / 2 - 20)
+	add_child(damage_label)
+	
+	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	tween.parallel().tween_property(damage_label, "position:y", damage_label.position.y - 50, 0.6)
+	tween.parallel().tween_property(damage_label, "modulate:a", 0.0, 0.6)
+	tween.tween_callback(damage_label.queue_free)
+
+func _show_heal_number(card: Control, heal_amount: int) -> void:
+	if not card:
+		return
+	
+	var heal_label = Label.new()
+	heal_label.text = "+" + str(heal_amount)
+	heal_label.add_theme_font_size_override("font_size", 24)
+	heal_label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.5))
+	
+	var card_global_pos = card.global_position
+	heal_label.position = card_global_pos + Vector2(card.size.x / 2 - 20, card.size.y / 2 - 20)
+	add_child(heal_label)
+	
+	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	tween.parallel().tween_property(heal_label, "position:y", heal_label.position.y - 50, 0.6)
+	tween.parallel().tween_property(heal_label, "modulate:a", 0.0, 0.6)
+	tween.tween_callback(heal_label.queue_free)
+
+func _animate_attack_projectile(attacker: Control, target: Control, is_magic: bool) -> void:
+	if not attacker or not target:
+		return
+	
+	var projectile = ColorRect.new()
+	projectile.size = Vector2(8, 8)
+	if is_magic:
+		projectile.color = Color(0.6, 0.4, 1.0)
+	else:
+		projectile.color = Color(1.0, 0.6, 0.2)
+	
+	var start_pos = attacker.global_position + attacker.size / 2
+	var end_pos = target.global_position + target.size / 2
+	projectile.position = start_pos
+	add_child(projectile)
+	
+	var tween = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tween.tween_property(projectile, "position", end_pos, 0.2)
+	tween.tween_callback(projectile.queue_free)

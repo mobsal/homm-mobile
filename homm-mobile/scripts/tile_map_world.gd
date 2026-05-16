@@ -32,6 +32,7 @@ var _hero: Node2D = null
 var _camera: Camera2D = null
 var _movement_indicator: Node2D = null  # Indicateur de portée de déplacement
 var _floating_texts: Array = []  # Textes flottants (effets visuels)
+var rng: RandomNumberGenerator = RandomNumberGenerator.new()  # Générateur de nombres aléatoires global
 
 # Références UI
 var _label_gold: Label = null
@@ -97,6 +98,14 @@ func _generate_sprite(type: String, size: int, variant_seed: int = -1) -> ImageT
 			_generate_enemy_sprite(img, size, rng, "archer")
 		"enemy_swordsman":
 			_generate_enemy_sprite(img, size, rng, "swordsman")
+		"enemy_tengu":
+			_generate_enemy_sprite(img, size, rng, "tengu")
+		"enemy_kappa":
+			_generate_enemy_sprite(img, size, rng, "kappa")
+		"enemy_ninja":
+			_generate_enemy_sprite(img, size, rng, "ninja")
+		"enemy_monk":
+			_generate_enemy_sprite(img, size, rng, "monk")
 		"hero":
 			_generate_hero_sprite(img, size, rng)
 		_:
@@ -307,314 +316,210 @@ func _create_elliptical_shadow(parent: Node2D, width: int, height: int, y_offset
 	shadow_sprite.set_z_index(-1)
 	parent.add_child(shadow_sprite)
 
-# --- CHÂTEAU 192x192 MEGA DÉTAILLÉ ---
+# --- CHÂTEAU JAPONAIS 192x192 (Shiro) ---
 func _generate_castle_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
 	var s: int = size
 	var hs: int = s / 2
 	
-	# === 1. OMBRE MASSIVE AU SOL ===
+	# === 1. OMBRE AU SOL ===
 	_draw_rect(img, 10, s - 12, s - 20, 12, Color(0, 0, 0, 0.30))
 	
-	# === 2. FOSSÉ D'EAU (demi-cercle devant) ===
-	for fx in range(hs - 60, hs + 60):
-		for fy in range(hs + 50, hs + 72):
-			var dist: float = abs(fx - hs) * 0.02 + (fy - hs - 50) * 0.03
-			if dist < 2.0:
-				var water: Color = Color(0.12, 0.22, 0.42, 0.85)
-				if (fx + fy) % 6 < 3:
-					water = Color(0.15, 0.26, 0.48, 0.85)
-				img.set_pixel(fx, fy, water)
+	# === 2. FONDATION EN PIERRE (ishigaki) ===
+	_draw_rect(img, 8, hs + 8, s - 16, hs - 12, Color(0.45, 0.42, 0.40))
+	_add_noise_to_rect(img, 8, hs + 8, s - 16, hs - 12, Color(0.45, 0.42, 0.40), 0.04, rng)
+	# Lignes de maçonnerie
+	for fy in range(hs + 16, s - 8, 8):
+		_draw_rect(img, 8, fy, s - 16, 1, Color(0.35, 0.32, 0.30))
 	
-	# === 3. PONT-LEVIS (bois détaillé avec traverses) ===
-	var bridge_w: int = 40
-	var bridge_x: int = hs - bridge_w / 2
-	_draw_rect(img, bridge_x - 2, hs + 48, bridge_w + 4, 14, Color(0.30, 0.20, 0.12))
-	for bx in [bridge_x, bridge_x + 6, bridge_x + 12, bridge_x + 18, bridge_x + 24, bridge_x + 30, bridge_x + 36]:
-		_draw_rect(img, bx, hs + 48, 3, 14, Color(0.25, 0.15, 0.08))
-	# Chaînes massives
-	_draw_rect(img, bridge_x - 4, hs + 44, 4, 16, Color(0.45, 0.42, 0.38))
-	_draw_rect(img, bridge_x + bridge_w, hs + 44, 4, 16, Color(0.45, 0.42, 0.38))
-	# Rivets sur les chaînes
-	for ry in [hs + 46, hs + 50, hs + 54, hs + 58]:
-		_draw_rect(img, bridge_x - 3, ry, 2, 2, Color(0.55, 0.52, 0.48))
-		_draw_rect(img, bridge_x + bridge_w + 1, ry, 2, 2, Color(0.55, 0.52, 0.48))
+	# === 3. MURS BLANCS (shirokabe) avec bois noir ===
+	var wall_base: int = hs - 40
+	var wall_h: int = 60
+	# Mur principal blanc
+	_add_noise_to_rect(img, hs - 50, wall_base, 100, wall_h, Color(0.92, 0.90, 0.85), 0.02, rng)
+	# Poutres en bois noir (horizontal)
+	for py in [wall_base + 8, wall_base + 24, wall_base + 40]:
+		_draw_rect(img, hs - 52, py, 104, 3, Color(0.12, 0.08, 0.06))
+	# Poutres verticales
+	for px in [hs - 40, hs - 20, hs, hs + 20, hs + 40]:
+		_draw_rect(img, px, wall_base, 3, wall_h, Color(0.12, 0.08, 0.06))
 	
-	# === 4. SOL / FONDATION (terre compacte avec herbe) ===
-	_draw_rect(img, 8, hs + 12, s - 16, hs - 16, Color(0.40, 0.30, 0.20))
-	_draw_rect(img, 6, hs + 12, s - 12, 6, Color(0.32, 0.30, 0.28))
-	# Herbe au bord
-	for gx in range(6, s - 6, 4):
-		if rng.randf() < 0.4:
-			_draw_rect(img, gx, hs + 10, 3, 4, Color(0.20, 0.38, 0.12))
+	# === 4. TOIT COURBÉ IRIMOYA (niveaux superposés) ===
+	# Premier niveau (toit inférieur)
+	for level in range(4):
+		var roof_y: int = wall_base - 10 - (level * 22)
+		var roof_w: int = 110 - (level * 18)
+		var roof_x: int = hs - roof_w / 2
+		
+		# Couche de tuiles sombres
+		for ty in range(12):
+			var tw: int = roof_w - abs(ty - 6) * 2
+			var tx: int = hs - tw / 2
+			var shade: float = 0.18 + ty * 0.015
+			_draw_rect(img, tx, roof_y - ty, tw, 2, Color(shade, shade * 0.12, shade * 0.08))
+		
+		# Bordure du toit (kawara)
+		_draw_rect(img, roof_x - 2, roof_y + 10, roof_w + 4, 3, Color(0.20, 0.12, 0.08))
+		# Extrémités courbées
+		_draw_circle(img, roof_x - 4, roof_y + 8, 4, Color(0.18, 0.10, 0.06))
+		_draw_circle(img, roof_x + roof_w + 4, roof_y + 8, 4, Color(0.18, 0.10, 0.06))
 	
-	# === 5. MUR D'ENCEINTE EXTÉRIEUR ===
-	var outer_mx: int = hs - 60
-	var outer_my: int = hs - 10
-	var outer_mw: int = 120
-	var outer_mh: int = 32
-	_add_noise_to_rect(img, outer_mx, outer_my, outer_mw, outer_mh, Color(0.48, 0.46, 0.43), 0.06, rng)
-	for jy in range(outer_my + 10, outer_my + outer_mh, 12):
-		_draw_rect(img, outer_mx, jy, outer_mw, 2, Color(0.38, 0.36, 0.33))
-	# Créneaux extérieurs
-	for cx in range(outer_mx, outer_mx + outer_mw, 8):
-		_draw_rect(img, cx, outer_my - 8, 4, 8, Color(0.46, 0.44, 0.41))
+	# === 5. DONJON CENTRAL (tenshu) ===
+	var tenshu_x: int = hs - 20
+	var tenshu_y: int = wall_base - 100
+	var tenshu_w: int = 40
+	var tenshu_h: int = 50
 	
-	# === 6. TOURS D'ANGLE (30×80) - 4 tours massives ===
-	var tw: int = 30
-	var th: int = 80
-	var tower_pos: Array = [Vector2(24, 18), Vector2(138, 18), Vector2(24, 78), Vector2(138, 78)]
-	var t_cols: Array = [Color(0.44, 0.42, 0.39), Color(0.46, 0.44, 0.41), Color(0.48, 0.46, 0.43), Color(0.45, 0.43, 0.40)]
+	# Mur blanc du tenshu
+	_add_noise_to_rect(img, tenshu_x, tenshu_y, tenshu_w, tenshu_h, Color(0.92, 0.90, 0.85), 0.02, rng)
+	# Poutres horizontales
+	for py in [tenshu_y + 8, tenshu_y + 24, tenshu_y + 40]:
+		_draw_rect(img, tenshu_x - 2, py, tenshu_w + 4, 3, Color(0.12, 0.08, 0.06))
+	# Poutres verticales
+	for px in [tenshu_x + 8, tenshu_x + 20, tenshu_x + 32]:
+		_draw_rect(img, px, tenshu_y, 3, tenshu_h, Color(0.12, 0.08, 0.06))
 	
-	for i in range(4):
-		var tx: int = int(tower_pos[i].x)
-		var ty: int = int(tower_pos[i].y)
-		# Base de la tour (plus large)
-		_draw_rect(img, tx - 2, ty + th - 4, tw + 4, 6, Color(0.38, 0.36, 0.33))
-		# Corps
-		_add_noise_to_rect(img, tx, ty, tw, th, t_cols[i], 0.06, rng)
-		# Joints horizontaux (tous les 10px)
-		for jy in range(ty + 12, ty + th, 10):
-			_draw_rect(img, tx, jy, tw, 2, Color(0.36, 0.34, 0.31))
-		# Meurtrières (petites fentes verticales)
-		for mry in [ty + 20, ty + 35, ty + 50, ty + 65]:
-			_draw_rect(img, tx + 6, mry, 3, 6, Color(0.15, 0.13, 0.10))
-			_draw_rect(img, tx + tw - 9, mry, 3, 6, Color(0.15, 0.13, 0.10))
-		# Créneaux (5 créneaux)
-		for cx in [tx + 4, tx + 10, tx + 16, tx + 22, tx + 26]:
-			_draw_rect(img, cx, ty - 8, 3, 10, t_cols[i])
+	# Toit du tenshu (courbé)
+	for ty in range(14):
+		var tw: int = tenshu_w + 8 - abs(ty - 7) * 2
+		var tx: int = hs - tw / 2
+		var shade: float = 0.18 + ty * 0.015
+		_draw_rect(img, tx, tenshu_y - 14 - ty, tw, 2, Color(shade, shade * 0.12, shade * 0.08))
 	
-	# === 7. MUR INTÉRIEUR ===
-	var mw: int = 84
-	var mh: int = 48
-	var mx: int = hs - mw / 2
-	var my: int = hs - 2
-	_add_noise_to_rect(img, mx, my, mw, mh, Color(0.50, 0.48, 0.45), 0.07, rng)
-	for jy in range(my + 12, my + mh, 12):
-		_draw_rect(img, mx, jy, mw, 2, Color(0.40, 0.38, 0.35))
-	# Créneaux intérieurs
-	for cx in range(mx, mx + mw, 7):
-		_draw_rect(img, cx, my - 8, 4, 8, Color(0.46, 0.44, 0.41))
-	
-	# === 8. DONJON CENTRAL (36×92) ===
-	var dw: int = 36
-	var dh: int = 92
-	var dx: int = hs - dw / 2
-	var dy: int = my - 32
-	_add_noise_to_rect(img, dx, dy, dw, dh, Color(0.46, 0.44, 0.41), 0.06, rng)
-	for jy in range(dy + 12, dy + dh, 10):
-		_draw_rect(img, dx, jy, dw, 2, Color(0.38, 0.36, 0.33))
-	# Meurtrières du donjon
-	for mry in [dy + 20, dy + 40, dy + 60, dy + 80]:
-		_draw_rect(img, dx + 8, mry, 3, 6, Color(0.15, 0.13, 0.10))
-		_draw_rect(img, dx + dw - 11, mry, 3, 6, Color(0.15, 0.13, 0.10))
-	# Créneaux
-	for cx in [dx + 4, dx + 12, dx + 20, dx + 28, dx + 32]:
-		_draw_rect(img, cx, dy - 8, 3, 10, Color(0.46, 0.44, 0.41))
-	
-	# === 9. TOITS CONIQUES DES TOURS (6 niveaux) ===
-	for i in range(4):
-		var tx: int = int(tower_pos[i].x)
-		var ty: int = int(tower_pos[i].y)
-		_draw_rect(img, tx - 2, ty - 14, tw + 4, 14, Color(0.50, 0.14, 0.04))
-		_draw_rect(img, tx, ty - 26, tw, 14, Color(0.56, 0.18, 0.06))
-		_draw_rect(img, tx + 3, ty - 38, tw - 6, 14, Color(0.62, 0.22, 0.08))
-		_draw_rect(img, tx + 6, ty - 48, tw - 12, 12, Color(0.68, 0.26, 0.10))
-		_draw_rect(img, tx + 9, ty - 56, tw - 18, 10, Color(0.73, 0.30, 0.12))
-		_draw_rect(img, tx + 12, ty - 62, tw - 24, 8, Color(0.78, 0.34, 0.14))
-		# Ornement doré
-		_draw_rect(img, tx + 13, ty - 68, 4, 6, Color(0.88, 0.72, 0.18))
-	
-	# Toit du donjon (plus grand)
-	_draw_rect(img, dx - 4, dy - 16, dw + 8, 16, Color(0.50, 0.14, 0.04))
-	_draw_rect(img, dx - 2, dy - 30, dw + 4, 16, Color(0.56, 0.18, 0.06))
-	_draw_rect(img, dx + 2, dy - 44, dw - 4, 16, Color(0.62, 0.22, 0.08))
-	_draw_rect(img, dx + 6, dy - 56, dw - 12, 14, Color(0.68, 0.26, 0.10))
-	_draw_rect(img, dx + 10, dy - 66, dw - 20, 12, Color(0.73, 0.30, 0.12))
-	_draw_rect(img, dx + 14, dy - 74, dw - 28, 10, Color(0.78, 0.34, 0.14))
-	_draw_rect(img, dx + 15, dy - 82, 6, 8, Color(0.90, 0.75, 0.20))
-	
-	# === 10. PORTE PRINCIPALE (double, massive) ===
-	var gate_w: int = 32
-	var gate_h: int = 28
-	var gate_x: int = hs - gate_w / 2
-	var gate_y: int = hs + 18
-	# Arc monumental (5 niveaux)
-	_draw_rect(img, gate_x - 4, gate_y - 4, gate_w + 8, 4, Color(0.42, 0.40, 0.37))
-	_draw_rect(img, gate_x - 2, gate_y - 8, gate_w + 4, 4, Color(0.45, 0.43, 0.40))
-	_draw_rect(img, gate_x, gate_y - 12, gate_w, 4, Color(0.48, 0.46, 0.43))
-	_draw_rect(img, gate_x + 2, gate_y - 16, gate_w - 4, 4, Color(0.50, 0.48, 0.45))
-	_draw_rect(img, gate_x + 4, gate_y - 20, gate_w - 8, 4, Color(0.52, 0.50, 0.47))
-	# Porte double en bois renforcé
-	_add_noise_to_rect(img, gate_x + 2, gate_y, gate_w - 4, gate_h, Color(0.20, 0.12, 0.05), 0.04, rng)
-	_draw_rect(img, hs - 1, gate_y, 2, gate_h, Color(0.12, 0.06, 0.02))
-	# Barreaux métalliques (3 barreaux)
-	for by in [gate_y + 6, gate_y + 14, gate_y + 22]:
-		_draw_rect(img, gate_x + 4, by, gate_w - 8, 2, Color(0.32, 0.28, 0.22))
-	# Rivets (plus nombreux)
-	for rx in [gate_x + 6, gate_x + 12, gate_x + gate_w - 8, gate_x + gate_w - 14]:
-		for ry in [gate_y + 3, gate_y + 10, gate_y + 17]:
-			_draw_rect(img, rx, ry, 2, 2, Color(0.48, 0.44, 0.38))
-	# Serrure massive
-	_draw_rect(img, hs - 3, gate_y + 10, 6, 8, Color(0.55, 0.50, 0.40))
-	_draw_rect(img, hs - 1, gate_y + 12, 2, 4, Color(0.25, 0.20, 0.15))
-	
-	# === 11. HERSE (grille avec barreaux individuels) ===
-	_draw_rect(img, gate_x + 2, gate_y - 20, gate_w - 4, 14, Color(0.28, 0.28, 0.30))
-	for hx in range(gate_x + 4, gate_x + gate_w - 4, 5):
-		_draw_rect(img, hx, gate_y - 20, 2, 14, Color(0.42, 0.42, 0.46))
-	# Pointes de la herse
-	for hx in [gate_x + 4, gate_x + 9, gate_x + 14, gate_x + 19, gate_x + 24]:
-		_draw_rect(img, hx, gate_y - 24, 2, 4, Color(0.50, 0.50, 0.54))
-	
-	# === 12. TORCHES (4 torches géantes) ===
-	var torch_positions: Array = [gate_x - 10, gate_x - 6, gate_x + gate_w + 4, gate_x + gate_w + 8]
-	for tx_pos in torch_positions:
-		_draw_rect(img, tx_pos, gate_y - 2, 3, 14, Color(0.32, 0.25, 0.18))
-		_draw_rect(img, tx_pos - 1, gate_y - 8, 5, 8, Color(0.88, 0.50, 0.12))
-		_draw_rect(img, tx_pos, gate_y - 6, 3, 5, Color(1.00, 0.78, 0.28))
-		_draw_rect(img, tx_pos + 1, gate_y - 5, 1, 3, Color(1.00, 0.92, 0.55))
-	
-	# === 13. FENÊTRES (8 fenêtres avec encadrement pierre) ===
-	var wps: Array = [
-		Vector2(64, 72), Vector2(96, 72), Vector2(128, 72),
-		Vector2(36, 58), Vector2(156, 58), Vector2(60, 38), Vector2(132, 38), Vector2(96, 22)
+	# === 6. FENÊTRES JAPONAISES (shoji) ===
+	var window_positions: Array = [
+		Vector2(hs - 35, wall_base + 12), Vector2(hs - 15, wall_base + 12), Vector2(hs + 5, wall_base + 12), Vector2(hs + 25, wall_base + 12),
+		Vector2(hs - 35, wall_base + 32), Vector2(hs - 15, wall_base + 32), Vector2(hs + 5, wall_base + 32), Vector2(hs + 25, wall_base + 32)
 	]
-	for wp in wps:
+	for wp in window_positions:
 		var wx: int = int(wp.x)
 		var wy: int = int(wp.y)
-		# Encadrement pierre (épais)
-		_draw_rect(img, wx - 4, wy - 4, 12, 3, Color(0.38, 0.36, 0.33))
-		_draw_rect(img, wx - 4, wy + 10, 12, 3, Color(0.38, 0.36, 0.33))
-		_draw_rect(img, wx - 4, wy - 1, 3, 12, Color(0.38, 0.36, 0.33))
-		_draw_rect(img, wx + 5, wy - 1, 3, 12, Color(0.38, 0.36, 0.33))
-		# Intérieur sombre
-		_draw_rect(img, wx - 1, wy, 6, 10, Color(0.10, 0.08, 0.06))
-		# Lumière jaune chaude (3 couches)
-		_draw_rect(img, wx, wy + 1, 4, 8, Color(0.85, 0.68, 0.18))
-		_draw_rect(img, wx + 1, wy + 2, 2, 6, Color(0.95, 0.78, 0.32))
-		_draw_rect(img, wx + 1, wy + 3, 2, 4, Color(1.00, 0.88, 0.45))
+		# Cadre en bois noir
+		_draw_rect(img, wx - 5, wy - 5, 14, 14, Color(0.12, 0.08, 0.06))
+		# Papier shoji (blanc translucide)
+		_draw_rect(img, wx - 3, wy - 3, 10, 10, Color(0.95, 0.93, 0.88))
+		# Grille en bois
+		_draw_rect(img, wx, wy - 3, 1, 10, Color(0.12, 0.08, 0.06))
+		_draw_rect(img, wx - 3, wy, 10, 1, Color(0.12, 0.08, 0.06))
 	
-	# === 14. DRAPEAUX (2 drapeaux) ===
-	for flag_info in [[144, 18], [40, 18]]:
-		var fpx: int = flag_info[0]
-		var fpy: int = flag_info[1]
-		_draw_rect(img, fpx, fpy - 44, 3, 50, Color(0.52, 0.42, 0.32))
-		_draw_rect(img, fpx - 1, fpy - 50, 5, 6, Color(0.88, 0.72, 0.18))
-		for i in range(10):
-			var wv: int = 3 if i % 2 == 0 else 0
-			_draw_rect(img, fpx + 4 + wv, fpy - 46 + i, 28, 3, Color(0.70, 0.08, 0.08))
-		# Lion / blason simplifié
-		_draw_rect(img, fpx + 14, fpy - 40, 6, 10, Color(0.85, 0.75, 0.15))
-		_draw_rect(img, fpx + 12, fpy - 36, 10, 3, Color(0.85, 0.75, 0.15))
+	# === 7. PORTE PRINCIPALE (ōtemon) ===
+	var gate_w: int = 28
+	var gate_h: int = 24
+	var gate_x: int = hs - gate_w / 2
+	var gate_y: int = hs + 12
 	
-	# === 15. BANNIÈRE AU-DESSUS DE LA PORTE ===
-	_draw_rect(img, hs - 14, gate_y - 24, 28, 10, Color(0.62, 0.10, 0.10))
-	_draw_rect(img, hs - 4, gate_y - 22, 8, 6, Color(0.88, 0.78, 0.18))
-	# Franges de la bannière
-	for fx in range(hs - 14, hs + 14, 4):
-		_draw_rect(img, fx, gate_y - 14, 2, 3, Color(0.65, 0.12, 0.12))
+	# Piliers en bois
+	_draw_rect(img, gate_x - 4, gate_y - 8, 6, gate_h + 8, Color(0.12, 0.08, 0.06))
+	_draw_rect(img, gate_x + gate_w - 2, gate_y - 8, 6, gate_h + 8, Color(0.12, 0.08, 0.06))
+	# Linteau
+	_draw_rect(img, gate_x - 6, gate_y - 12, gate_w + 12, 6, Color(0.12, 0.08, 0.06))
+	# Porte en bois
+	_add_noise_to_rect(img, gate_x + 2, gate_y, gate_w - 4, gate_h, Color(0.18, 0.12, 0.06), 0.03, rng)
+	# Panneaux de la porte
+	_draw_rect(img, gate_x + 2, gate_y, gate_w / 2 - 2, gate_h, Color(0.15, 0.10, 0.05))
+	# Poignées en métal
+	_draw_rect(img, gate_x + gate_w / 2 - 2, gate_y + 10, 4, 4, Color(0.65, 0.55, 0.45))
 	
-	# === 16. ÉCURIE / FORGE À DROITE ===
-	var stable_x: int = hs + 54
-	var stable_y: int = hs + 8
-	_add_noise_to_rect(img, stable_x, stable_y, 28, 24, Color(0.38, 0.30, 0.22), 0.05, rng)
-	_draw_rect(img, stable_x + 4, stable_y + 20, 20, 4, Color(0.32, 0.22, 0.14))
-	# Toit de chaume
-	_draw_rect(img, stable_x - 2, stable_y - 6, 32, 8, Color(0.55, 0.45, 0.25))
-	_draw_rect(img, stable_x, stable_y - 12, 28, 6, Color(0.60, 0.50, 0.30))
-	# Porte écurie
-	_draw_rect(img, stable_x + 8, stable_y + 6, 12, 14, Color(0.25, 0.18, 0.10))
-	# Cheval (silhouette simplifiée)
-	_draw_rect(img, stable_x + 10, stable_y + 2, 8, 10, Color(0.55, 0.45, 0.35))
-	_draw_rect(img, stable_x + 12, stable_y - 2, 4, 6, Color(0.55, 0.45, 0.35))
+	# === 8. TORII (porte shintoïste) ===
+	var torii_x: int = hs + 55
+	var torii_y: int = hs + 4
+	# Piliers rouges (vermilion)
+	_draw_rect(img, torii_x, torii_y - 20, 4, 28, Color(0.85, 0.25, 0.25))
+	_draw_rect(img, torii_x + 14, torii_y - 20, 4, 28, Color(0.85, 0.25, 0.25))
+	# Linteau supérieur (kasagi) courbé
+	for tx in range(torii_x - 4, torii_x + 22):
+		var curve: int = 2 if tx < torii_x + 2 or tx > torii_x + 16 else 0
+		_draw_rect(img, tx, torii_y - 24 - curve, 2, 6, Color(0.85, 0.25, 0.25))
+	# Linteau inférieur (nuki)
+	_draw_rect(img, torii_x - 2, torii_y - 8, 22, 3, Color(0.85, 0.25, 0.25))
 	
-	# === 17. PUITS À GAUCHE ===
-	var well_x: int = hs - 52
-	var well_y: int = hs + 14
-	_draw_rect(img, well_x, well_y, 16, 14, Color(0.35, 0.33, 0.30))
-	_draw_rect(img, well_x + 2, well_y + 2, 12, 10, Color(0.08, 0.10, 0.15))
-	_draw_rect(img, well_x + 7, well_y - 14, 2, 16, Color(0.45, 0.38, 0.28))
-	_draw_rect(img, well_x + 2, well_y - 16, 12, 4, Color(0.42, 0.35, 0.25))
-	# Seau
-	_draw_rect(img, well_x + 18, well_y + 6, 6, 8, Color(0.42, 0.32, 0.20))
+	# === 9. BANNIÈRE (nobori) ===
+	var banner_x: int = hs - 60
+	var banner_y: int = wall_base - 60
+	# Poteau
+	_draw_rect(img, banner_x, banner_y - 30, 3, 50, Color(0.45, 0.35, 0.25))
+	# Drapeau rouge avec cercle du soleil
+	for i in range(20):
+		var wv: int = 2 if i % 2 == 0 else 0
+		_draw_rect(img, banner_x + 4 + wv, banner_y - 28 + i, 18, 2, Color(0.85, 0.25, 0.25))
+	# Cercle du soleil (hinomaru)
+	_draw_circle(img, banner_x + 13, banner_y - 18, 5, Color(0.95, 0.85, 0.20))
 	
-	# === 18. CIMETIÈRE À GAUCHE (3 tombes) ===
-	for tomb in [[hs - 44, hs + 6], [hs - 38, hs + 10], [hs - 50, hs + 12]]:
-		var tmx: int = tomb[0]
-		var tmy: int = tomb[1]
-		_draw_rect(img, tmx, tmy, 6, 8, Color(0.42, 0.40, 0.38))
-		_draw_rect(img, tmx + 1, tmy - 4, 4, 4, Color(0.38, 0.36, 0.34))
-		_draw_rect(img, tmx + 2, tmy - 3, 2, 3, Color(0.52, 0.50, 0.48))
+	# === 10. SAKURA (cerisiers en fleurs) ===
+	for tree in [[hs - 55, hs + 20], [hs + 55, hs + 18]]:
+		var tx: int = tree[0]
+		var ty: int = tree[1]
+		# Tronc
+		_draw_rect(img, tx, ty - 20, 6, 24, Color(0.35, 0.22, 0.12))
+		# Branches
+		_draw_rect(img, tx - 8, ty - 28, 12, 4, Color(0.32, 0.20, 0.10))
+		_draw_rect(img, tx + 4, ty - 32, 10, 4, Color(0.32, 0.20, 0.10))
+		# Fleurs de sakura (rose pâle)
+		for fx in range(tx - 12, tx + 14, 4):
+			for fy in range(ty - 36, ty - 20, 4):
+				if rng.randf() < 0.6:
+					var petal_color: Color = Color(0.95, 0.75, 0.85) if rng.randf() < 0.5 else Color(0.90, 0.65, 0.78)
+					_draw_circle(img, fx, fy, 3, petal_color)
 	
-	# === 19. POTENCE (à droite, loin) ===
-	var gib_x: int = hs + 64
-	var gib_y: int = hs + 4
-	_draw_rect(img, gib_x, gib_y, 3, 24, Color(0.32, 0.25, 0.18))
-	_draw_rect(img, gib_x - 4, gib_y - 2, 11, 3, Color(0.32, 0.25, 0.18))
-	_draw_rect(img, gib_x + 2, gib_y + 4, 2, 6, Color(0.28, 0.20, 0.15))
-	
-	# === 20. VÉGÉTATION LUXURIANTE ===
-	# Arbustes contre le mur
-	for bush in [[18, hs + 16], [170, hs + 14], [14, hs + 28], [174, hs + 26]]:
-		var bx: int = bush[0]
-		var by: int = bush[1]
-		_draw_circle(img, bx, by, 5, Color(0.18, 0.35, 0.10))
-		_draw_circle(img, bx + 2, by - 2, 3, Color(0.22, 0.42, 0.12))
-	# Fleurs devant
-	for flower in [[hs - 30, hs + 38], [hs + 28, hs + 40], [hs - 20, hs + 44], [hs + 18, hs + 46]]:
-		var flx: int = flower[0]
-		var fly: int = flower[1]
-		_draw_rect(img, flx, fly, 2, 2, Color(0.85, 0.20, 0.20))
-		_draw_rect(img, flx + 1, fly + 2, 2, 3, Color(0.20, 0.40, 0.10))
-	# Champignons
-	_draw_rect(img, hs + 42, hs + 34, 3, 3, Color(0.72, 0.15, 0.15))
-	_draw_rect(img, hs + 43, hs + 37, 2, 2, Color(0.35, 0.28, 0.20))
-	
-	# === 21. CHEMIN DE TERRE DÉTAILLÉ ===
-	_draw_rect(img, hs - 20, hs + 56, 40, 28, Color(0.52, 0.40, 0.28))
-	for px in [hs - 14, hs - 6, hs + 4, hs + 12, hs + 18]:
-		for py in [hs + 60, hs + 68, hs + 76]:
-			if rng.randf() < 0.6:
-				_draw_rect(img, px, py, 4, 3, Color(0.58, 0.46, 0.34))
-	
-	# === 22. GARDES (2 petites silhouettes devant la porte) ===
-	for guard_x in [hs - 18, hs + 14]:
-		_draw_rect(img, guard_x, gate_y + 28, 4, 10, Color(0.55, 0.55, 0.60))
-		_draw_rect(img, guard_x - 1, gate_y + 24, 6, 4, Color(0.60, 0.60, 0.65))
-		_draw_rect(img, guard_x, gate_y + 20, 4, 4, Color(0.45, 0.40, 0.35))
-		# Lance
-		_draw_rect(img, guard_x + 4, gate_y + 16, 2, 20, Color(0.35, 0.30, 0.25))
-		_draw_rect(img, guard_x + 3, gate_y + 14, 4, 3, Color(0.55, 0.55, 0.60))
+	# === 11. JARDIN ZEN (gauche) ===
+	var zen_x: int = hs - 65
+	var zen_y: int = hs + 10
+	# Sol de gravier
+	_draw_rect(img, zen_x, zen_y, 20, 16, Color(0.65, 0.60, 0.55))
+	_add_noise_to_rect(img, zen_x, zen_y, 20, 16, Color(0.65, 0.60, 0.55), 0.03, rng)
+	# Pierres zen
+	_draw_circle(img, zen_x + 5, zen_y + 8, 4, Color(0.45, 0.42, 0.40))
+	_draw_circle(img, zen_x + 14, zen_y + 5, 3, Color(0.48, 0.45, 0.43))
+	# Bambou
+	for bx in [zen_x + 8, zen_x + 16]:
+		_draw_rect(img, bx, zen_y - 8, 2, 18, Color(0.25, 0.45, 0.30))
+		_draw_rect(img, bx, zen_y - 10, 2, 2, Color(0.30, 0.50, 0.35))
 
-# --- MAISON ---
+
+# --- MAISON JAPONAISE (Minka) ---
 func _generate_house_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
 	var s: int = size
 	var hs: int = s / 2
 	
-	# Sol
-	_draw_rect(img, 6, hs + 8, s - 12, hs - 10, Color(0.50, 0.40, 0.28))
+	# Sol de terre battue
+	_draw_rect(img, 6, hs + 8, s - 12, hs - 10, Color(0.55, 0.45, 0.35))
+	_add_noise_to_rect(img, 6, hs + 8, s - 12, hs - 10, Color(0.55, 0.45, 0.35), 0.03, rng)
 	
-	# Mur principal (bois/plâtre)
-	_add_noise_to_rect(img, hs - 16, hs - 4, 32, 22, Color(0.72, 0.62, 0.45), 0.06, rng)
+	# Mur principal (bois sombre avec papier shoji)
+	_add_noise_to_rect(img, hs - 18, hs - 6, 36, 24, Color(0.35, 0.25, 0.18), 0.04, rng)
 	
 	# Poutres de bois (verticales)
-	for px in [hs - 14, hs + 14]:
-		_draw_rect(img, px, hs - 4, 3, 22, Color(0.38, 0.24, 0.14))
+	for px in [hs - 14, hs - 6, hs + 2, hs + 10, hs + 18]:
+		_draw_rect(img, px, hs - 6, 3, 24, Color(0.12, 0.08, 0.06))
 	
-	# Toit (triangle avec tuiles)
-	for ty in range(14):
-		var tw: int = 34 - ty * 2
+	# Poutres horizontales
+	for py in [hs + 2, hs + 12]:
+		_draw_rect(img, hs - 18, py, 36, 2, Color(0.12, 0.08, 0.06))
+	
+	# Fenêtre shoji (papier translucide)
+	_draw_rect(img, hs - 8, hs - 2, 8, 10, Color(0.95, 0.93, 0.88))
+	# Grille en bois
+	_draw_rect(img, hs - 4, hs - 2, 1, 10, Color(0.12, 0.08, 0.06))
+	_draw_rect(img, hs - 8, hs + 2, 8, 1, Color(0.12, 0.08, 0.06))
+	_draw_rect(img, hs, hs - 2, 1, 10, Color(0.12, 0.08, 0.06))
+	
+	# Toit courbé irimoya (tuiles sombres)
+	for ty in range(16):
+		var tw: int = 38 - abs(ty - 8) * 2
 		var tx: int = hs - tw / 2
-		var shade: float = 0.55 + ty * 0.015
-		_draw_rect(img, tx, hs - 16 - ty, tw, 2, Color(shade, shade * 0.35, shade * 0.15))
+		var shade: float = 0.18 + ty * 0.012
+		_draw_rect(img, tx, hs - 20 - ty, tw, 2, Color(shade, shade * 0.12, shade * 0.08))
 	
-	# Porte
-	_draw_rect(img, hs - 5, hs + 8, 10, 12, Color(0.30, 0.18, 0.10))
-	_draw_rect(img, hs - 1, hs + 8, 2, 12, Color(0.20, 0.12, 0.06))
+	# Bordure du toit (kawara)
+	_draw_rect(img, hs - 20, hs - 6, 40, 3, Color(0.20, 0.12, 0.08))
+	# Extrémités courbées
+	_draw_circle(img, hs - 22, hs - 8, 4, Color(0.18, 0.10, 0.06))
+	_draw_circle(img, hs + 22, hs - 8, 4, Color(0.18, 0.10, 0.06))
 	
-	# Fenêtre
-	_draw_rect(img, hs - 10, hs - 2, 6, 6, Color(0.12, 0.10, 0.08))
-	_draw_rect(img, hs - 9, hs - 1, 4, 4, Color(0.80, 0.65, 0.30))
+	# Porte coulissante (shoji)
+	_draw_rect(img, hs + 8, hs + 4, 8, 14, Color(0.95, 0.93, 0.88))
+	_draw_rect(img, hs + 10, hs + 4, 1, 14, Color(0.12, 0.08, 0.06))
+	_draw_rect(img, hs + 8, hs + 8, 8, 1, Color(0.12, 0.08, 0.06))
+	_draw_rect(img, hs + 8, hs + 12, 8, 1, Color(0.12, 0.08, 0.06))
 	
 	# Ombre
 	_draw_rect(img, 10, s - 5, s - 20, 3, Color(0, 0, 0, 0.25))
@@ -1060,7 +965,7 @@ func _generate_chest_sprite(img: Image, size: int, rng: RandomNumberGenerator) -
 	_draw_rect(img, hs - 8, hs - 18, 4, 2, Color(1.0, 0.95, 0.80))
 	_draw_rect(img, hs + 4, hs - 16, 3, 2, Color(1.0, 0.95, 0.80))
 
-# --- ENNEMI 64x64 ULTRA-DÉTAILLÉ ---
+# --- ENNEMI JAPONAIS 64x64 ---
 func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, enemy_type: String) -> void:
 	var s: int = size
 	var hs: int = s / 2
@@ -1079,23 +984,47 @@ func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, e
 			weapon_color = Color(0.65, 0.65, 0.70)
 			eye_color = Color(0.85, 0.20, 0.15)
 		"goblin":
-			body_color = Color(0.22, 0.52, 0.16)
-			head_color = Color(0.32, 0.62, 0.22)
-			detail_color = Color(0.15, 0.35, 0.10)
-			weapon_color = Color(0.55, 0.30, 0.15)
-			eye_color = Color(0.90, 0.15, 0.15)
+			body_color = Color(0.75, 0.15, 0.15)  # Oni rouge
+			head_color = Color(0.85, 0.20, 0.20)
+			detail_color = Color(0.55, 0.10, 0.10)
+			weapon_color = Color(0.35, 0.25, 0.15)  # Kanabo (club)
+			eye_color = Color(0.95, 0.85, 0.20)
 		"archer":
-			body_color = Color(0.58, 0.28, 0.18)
-			head_color = Color(0.72, 0.42, 0.28)
-			detail_color = Color(0.38, 0.18, 0.10)
-			weapon_color = Color(0.45, 0.30, 0.15)
-			eye_color = Color(0.20, 0.15, 0.10)
+			body_color = Color(0.35, 0.25, 0.18)  # Kimono sombre
+			head_color = Color(0.90, 0.75, 0.60)  # Peau japonaise
+			detail_color = Color(0.20, 0.12, 0.08)
+			weapon_color = Color(0.45, 0.30, 0.15)  # Yumi (arc)
+			eye_color = Color(0.12, 0.08, 0.06)
 		"swordsman":
-			body_color = Color(0.35, 0.38, 0.48)
-			head_color = Color(0.50, 0.55, 0.65)
-			detail_color = Color(0.55, 0.58, 0.68)
-			weapon_color = Color(0.70, 0.72, 0.78)
-			eye_color = Color(0.15, 0.20, 0.40)
+			body_color = Color(0.12, 0.08, 0.06)  # Armure noire samurai
+			head_color = Color(0.90, 0.75, 0.60)
+			detail_color = Color(0.85, 0.25, 0.25)  # Vermilion accents
+			weapon_color = Color(0.85, 0.82, 0.78)  # Katana
+			eye_color = Color(0.12, 0.08, 0.06)
+		"tengu":
+			body_color = Color(0.45, 0.35, 0.25)  # Plumage marron
+			head_color = Color(0.55, 0.45, 0.35)
+			detail_color = Color(0.85, 0.65, 0.15)  # Bec jaune
+			weapon_color = Color(0.35, 0.25, 0.18)  # Éventail
+			eye_color = Color(0.85, 0.20, 0.10)
+		"kappa":
+			body_color = Color(0.25, 0.55, 0.65)  # Peau verte
+			head_color = Color(0.30, 0.60, 0.70)
+			detail_color = Color(0.20, 0.45, 0.55)
+			weapon_color = Color(0.35, 0.25, 0.18)  # Éventail
+			eye_color = Color(0.85, 0.85, 0.20)
+		"ninja":
+			body_color = Color(0.08, 0.08, 0.10)  # Tenue noire
+			head_color = Color(0.10, 0.10, 0.12)
+			detail_color = Color(0.20, 0.20, 0.22)
+			weapon_color = Color(0.55, 0.55, 0.60)  # Kunai/Shuriken
+			eye_color = Color(0.85, 0.85, 0.20)
+		"monk":
+			body_color = Color(0.85, 0.70, 0.45)  # Robe safran
+			head_color = Color(0.90, 0.75, 0.60)
+			detail_color = Color(0.70, 0.55, 0.30)
+			weapon_color = Color(0.55, 0.45, 0.30)  # Bâton
+			eye_color = Color(0.12, 0.08, 0.06)
 	
 	# Ombre elliptique réaliste
 	for x in range(s):
@@ -1133,9 +1062,9 @@ func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, e
 	_draw_rect(img, hs + 5, hs - 15, 1, 1, Color(1, 1, 1))
 	# Sourcils/oreilles selon type
 	if enemy_type == "goblin":
-		# Oreilles pointues avec dégradé
-		_draw_triangle(img, hs - 12, hs - 12, hs - 18, hs - 18, hs - 8, hs - 18, head_color)
-		_draw_triangle(img, hs + 12, hs - 12, hs + 18, hs - 18, hs + 8, hs - 18, head_color)
+		# Cornes d'Oni (rouges)
+		_draw_triangle(img, hs - 12, hs - 18, hs - 18, hs - 28, hs - 8, hs - 22, head_color)
+		_draw_triangle(img, hs + 12, hs - 18, hs + 18, hs - 28, hs + 8, hs - 22, head_color)
 		# Dents crochues
 		_draw_rect(img, hs - 2, hs - 5, 2, 3, Color(0.90, 0.90, 0.85))
 		_draw_rect(img, hs, hs - 5, 2, 3, Color(0.90, 0.90, 0.85))
@@ -1153,20 +1082,41 @@ func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, e
 		for ry in [hs + 4, hs + 8, hs + 12]:
 			_draw_rect(img, hs - 6, ry, 12, 2, Color(0.75, 0.78, 0.75))
 	elif enemy_type == "swordsman":
-		# Casque avec visière et crête
-		_draw_gradient_rect(img, hs - 12, hs - 22, 24, 8, Color(0.48, 0.52, 0.62), Color(0.42, 0.45, 0.55))
-		_draw_rect(img, hs - 2, hs - 26, 4, 6, Color(0.65, 0.68, 0.78))
-		# Visière
-		_draw_gradient_rect(img, hs - 10, hs - 18, 20, 5, Color(0.35, 0.38, 0.48), Color(0.30, 0.33, 0.42))
-		# Barbe noire
-		for by in range(hs - 6, hs + 2):
-			var bw: int = int(lerp(10.0, 3.0, float(by - (hs - 6)) / 8.0))
-			_draw_rect(img, hs - bw / 2, by, bw, 2, Color(0.12, 0.10, 0.08))
+		# Casque samurai (kabuto) avec crête
+		_draw_gradient_rect(img, hs - 12, hs - 24, 24, 12, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
+		_draw_rect(img, hs - 2, hs - 30, 4, 8, Color(0.85, 0.25, 0.25))  # Crête vermilion
+		# Visière (mempo)
+		_draw_gradient_rect(img, hs - 10, hs - 16, 20, 6, Color(0.15, 0.10, 0.08), Color(0.10, 0.06, 0.04))
+		# Chignon samurai
+		_draw_circle(img, hs + 8, hs - 20, 4, Color(0.06, 0.04, 0.02))
 	elif enemy_type == "archer":
-		# Capuche
-		_draw_gradient_rect(img, hs - 10, hs - 22, 20, 8, Color(0.48, 0.22, 0.12), Color(0.38, 0.18, 0.10))
-		_draw_rect(img, hs - 12, hs - 18, 4, 8, Color(0.38, 0.18, 0.10))
-		_draw_rect(img, hs + 8, hs - 18, 4, 8, Color(0.38, 0.18, 0.10))
+		# Chapeau conique (jingasa)
+		_draw_gradient_rect(img, hs - 14, hs - 26, 28, 8, Color(0.35, 0.25, 0.18), Color(0.25, 0.18, 0.12))
+		_draw_rect(img, hs - 2, hs - 28, 4, 4, Color(0.35, 0.25, 0.18))
+	elif enemy_type == "tengu":
+		# Masque de Tengu avec long nez
+		_draw_shaded_circle(img, hs, hs - 14, 14, Color(0.55, 0.45, 0.35), Vector2(-0.3, -0.8))
+		# Long nez rouge
+		_draw_triangle(img, hs, hs - 16, hs + 4, hs - 32, hs - 4, hs - 16, Color(0.85, 0.20, 0.10))
+		# Plumes sur la tête
+		for py in [hs - 22, hs - 26, hs - 30]:
+			_draw_rect(img, hs - 8, py, 16, 2, Color(0.45, 0.35, 0.25))
+	elif enemy_type == "kappa":
+		# Tête chauve avec assiette
+		_draw_shaded_circle(img, hs, hs - 14, 14, Color(0.30, 0.60, 0.70), Vector2(-0.3, -0.8))
+		# Assiette sur la tête
+		_draw_circle(img, hs, hs - 20, 6, Color(0.65, 0.65, 0.60))
+		_draw_circle(img, hs, hs - 20, 4, Color(0.55, 0.55, 0.50))
+	elif enemy_type == "ninja":
+		# Masque ninja avec seulement les yeux visibles
+		_draw_shaded_circle(img, hs, hs - 14, 14, Color(0.10, 0.10, 0.12), Vector2(-0.3, -0.8))
+		# Bandeau sur les yeux
+		_draw_rect(img, hs - 12, hs - 16, 24, 4, Color(0.08, 0.08, 0.10))
+	elif enemy_type == "monk":
+		# Tête rasée
+		_draw_shaded_circle(img, hs, hs - 14, 14, Color(0.90, 0.75, 0.60), Vector2(-0.3, -0.8))
+		# Sourcils rasés
+		_draw_rect(img, hs - 6, hs - 18, 12, 2, Color(0.90, 0.75, 0.60))
 	
 	# Bouche détaillée
 	if enemy_type == "skeleton":
@@ -1177,35 +1127,60 @@ func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, e
 	
 	# Détail / armure sur le corps avec textures
 	if enemy_type == "swordsman":
-		# Plastron métallique avec rivets
-		_draw_shaded_circle(img, hs, hs + 2, 14, Color(0.55, 0.58, 0.68), Vector2(-0.5, -0.8))
-		_draw_gradient_rect(img, hs - 8, hs - 2, 16, 16, Color(0.62, 0.65, 0.75), Color(0.48, 0.51, 0.60))
-		_add_bevel(img, hs - 8, hs - 2, 16, 16, Color(0.72, 0.75, 0.85), Color(0.38, 0.41, 0.50))
-		# Rivets
-		for ry in [hs - 1, hs + 6, hs + 12]:
-			for rx in [hs - 6, hs + 6]:
-				_draw_rect(img, rx - 1, ry - 1, 3, 3, Color(0.55, 0.55, 0.60))
-				_draw_rect(img, rx, ry, 1, 1, Color(0.85, 0.85, 0.90))
+		# Armure samurai (do) avec lames laquées noires
+		_draw_shaded_circle(img, hs, hs + 2, 14, Color(0.12, 0.08, 0.06), Vector2(-0.5, -0.8))
+		_draw_gradient_rect(img, hs - 8, hs - 2, 16, 16, Color(0.15, 0.10, 0.08), Color(0.08, 0.05, 0.04))
+		_add_bevel(img, hs - 8, hs - 2, 16, 16, Color(0.20, 0.12, 0.08), Color(0.06, 0.04, 0.02))
+		# Bordures vermilion
+		_draw_rect(img, hs - 8, hs - 2, 16, 2, Color(0.85, 0.25, 0.25))
+		_draw_rect(img, hs - 8, hs + 14, 16, 2, Color(0.85, 0.25, 0.25))
+		# Mon (crest) au centre
+		_draw_circle(img, hs, hs + 6, 4, Color(0.85, 0.25, 0.25))
+		_draw_circle(img, hs, hs + 6, 2, Color(0.95, 0.85, 0.20))
 	elif enemy_type == "archer":
-		# Cape avec plis
-		_draw_gradient_rect(img, hs - 14, hs, 6, 20, Color(0.35, 0.15, 0.08), Color(0.22, 0.10, 0.05))
-		_draw_gradient_rect(img, hs + 8, hs, 6, 20, Color(0.35, 0.15, 0.08), Color(0.22, 0.10, 0.05))
-		_draw_gradient_rect(img, hs - 8, hs + 2, 16, 16, Color(0.42, 0.20, 0.10), Color(0.28, 0.12, 0.06))
+		# Kimono avec motifs
+		_draw_gradient_rect(img, hs - 14, hs, 6, 20, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
+		_draw_gradient_rect(img, hs + 8, hs, 6, 20, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
+		_draw_gradient_rect(img, hs - 8, hs + 2, 16, 16, Color(0.42, 0.30, 0.20), Color(0.28, 0.18, 0.10))
+		# Obi (ceinture) vermilion
+		_draw_rect(img, hs - 8, hs + 10, 16, 4, Color(0.85, 0.25, 0.25))
 		# Carquois avec flèches
 		_draw_rect(img, hs - 16, hs - 10, 5, 14, Color(0.30, 0.18, 0.08))
 		for ay in [hs - 12, hs - 8, hs - 4]:
 			_draw_rect(img, hs - 18, ay, 2, 10, Color(0.55, 0.45, 0.30))
 			_draw_rect(img, hs - 16, ay - 2, 2, 2, Color(0.55, 0.55, 0.60))
 	elif enemy_type == "goblin":
-		# Armure de cuir avec clous
-		_draw_gradient_rect(img, hs - 8, hs, 16, 12, Color(0.35, 0.22, 0.10), Color(0.22, 0.14, 0.06))
-		for ry in [hs + 2, hs + 6, hs + 10]:
-			for rx in [hs - 5, hs + 4]:
-				_draw_rect(img, rx, ry, 2, 2, Color(0.45, 0.35, 0.25))
-		# Ceinture avec dents
-		_draw_rect(img, hs - 6, hs + 10, 12, 3, Color(0.42, 0.28, 0.15))
-		for dx in range(-4, 5, 3):
-			_draw_rect(img, hs + dx, hs + 10, 1, 3, Color(0.55, 0.40, 0.25))
+		# Peau d'Oni avec muscles
+		_draw_gradient_rect(img, hs - 8, hs, 16, 12, Color(0.75, 0.15, 0.15), Color(0.55, 0.10, 0.10))
+		# Tatouages/scarifications
+		for ry in [hs + 2, hs + 6]:
+			_draw_rect(img, hs - 5, ry, 10, 2, Color(0.45, 0.08, 0.08))
+		# Fundoshi (loincloth)
+		_draw_rect(img, hs - 6, hs + 10, 12, 3, Color(0.85, 0.25, 0.25))
+	elif enemy_type == "tengu":
+		# Plumage sur le corps
+		_draw_gradient_rect(img, hs - 8, hs, 16, 12, Color(0.45, 0.35, 0.25), Color(0.35, 0.25, 0.15))
+		# Ailes pliées
+		for wy in [hs - 2, hs + 2, hs + 6]:
+			_draw_rect(img, hs - 14, wy, 6, 3, Color(0.50, 0.40, 0.30))
+			_draw_rect(img, hs + 8, wy, 6, 3, Color(0.50, 0.40, 0.30))
+	elif enemy_type == "kappa":
+		# Carapace de tortue sur le dos
+		_draw_gradient_rect(img, hs - 8, hs - 2, 16, 14, Color(0.25, 0.55, 0.65), Color(0.20, 0.45, 0.55))
+		# Motifs de carapace
+		for cy in [hs + 2, hs + 6]:
+			_draw_rect(img, hs - 6, cy, 12, 2, Color(0.20, 0.50, 0.60))
+	elif enemy_type == "ninja":
+		# Tenue noire ajustée
+		_draw_gradient_rect(img, hs - 8, hs, 16, 12, Color(0.08, 0.08, 0.10), Color(0.06, 0.06, 0.08))
+		# Ceinture avec kunai
+		_draw_rect(img, hs - 6, hs + 10, 12, 3, Color(0.15, 0.15, 0.18))
+		_draw_rect(img, hs - 4, hs + 12, 3, 5, Color(0.55, 0.55, 0.60))
+	elif enemy_type == "monk":
+		# Robe de moine safran
+		_draw_gradient_rect(img, hs - 10, hs, 20, 14, Color(0.85, 0.70, 0.45), Color(0.70, 0.55, 0.30))
+		# Kesa (écharpe de moine)
+		_draw_rect(img, hs - 8, hs + 2, 16, 4, Color(0.60, 0.45, 0.25))
 	elif enemy_type == "skeleton":
 		# Os du torse
 		_draw_rect(img, hs - 4, hs - 2, 8, 16, Color(0.78, 0.82, 0.78))
@@ -1226,11 +1201,33 @@ func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, e
 	
 	# Jambes / Pieds détaillés
 	if enemy_type == "goblin":
-		_draw_gradient_rect(img, hs - 8, hs + 16, 5, 8, Color(0.18, 0.42, 0.12), Color(0.12, 0.30, 0.08))
-		_draw_gradient_rect(img, hs + 3, hs + 16, 5, 8, Color(0.18, 0.42, 0.12), Color(0.12, 0.30, 0.08))
-		# Grands pieds
-		_draw_rect(img, hs - 10, hs + 22, 8, 3, Color(0.12, 0.30, 0.08))
-		_draw_rect(img, hs + 2, hs + 22, 8, 3, Color(0.12, 0.30, 0.08))
+		# Jambes musclées d'Oni
+		_draw_gradient_rect(img, hs - 6, hs + 12, 5, 6, Color(0.75, 0.15, 0.15), Color(0.55, 0.10, 0.10))
+		_draw_gradient_rect(img, hs + 1, hs + 12, 5, 6, Color(0.75, 0.15, 0.15), Color(0.55, 0.10, 0.10))
+	elif enemy_type == "tengu":
+		# Pattes d'oiseau avec griffes
+		_draw_gradient_rect(img, hs - 6, hs + 12, 5, 6, Color(0.55, 0.45, 0.35), Color(0.45, 0.35, 0.25))
+		_draw_gradient_rect(img, hs + 1, hs + 12, 5, 6, Color(0.55, 0.45, 0.35), Color(0.45, 0.35, 0.25))
+		# Griffes
+		_draw_triangle(img, hs - 6, hs + 18, hs - 8, hs + 22, hs - 4, hs + 18, Color(0.85, 0.65, 0.15))
+		_draw_triangle(img, hs + 6, hs + 18, hs + 8, hs + 22, hs + 4, hs + 18, Color(0.85, 0.65, 0.15))
+	elif enemy_type == "kappa":
+		# Jambes palmées
+		_draw_gradient_rect(img, hs - 6, hs + 12, 5, 6, Color(0.30, 0.60, 0.70), Color(0.20, 0.45, 0.55))
+		_draw_gradient_rect(img, hs + 1, hs + 12, 5, 6, Color(0.30, 0.60, 0.70), Color(0.20, 0.45, 0.55))
+		# Palmes
+		_draw_rect(img, hs - 8, hs + 18, 6, 2, Color(0.25, 0.55, 0.65))
+		_draw_rect(img, hs + 2, hs + 18, 6, 2, Color(0.25, 0.55, 0.65))
+	elif enemy_type == "ninja":
+		# Jambes ajustées
+		_draw_gradient_rect(img, hs - 6, hs + 12, 5, 6, Color(0.08, 0.08, 0.10), Color(0.06, 0.06, 0.08))
+		_draw_gradient_rect(img, hs + 1, hs + 12, 5, 6, Color(0.08, 0.08, 0.10), Color(0.06, 0.06, 0.08))
+	elif enemy_type == "monk":
+		# Robe longue
+		_draw_gradient_rect(img, hs - 8, hs + 12, 16, 6, Color(0.85, 0.70, 0.45), Color(0.70, 0.55, 0.30))
+		# Pieds nus
+		_draw_rect(img, hs - 10, hs + 22, 8, 3, Color(0.55, 0.10, 0.10))
+		_draw_rect(img, hs + 2, hs + 22, 8, 3, Color(0.55, 0.10, 0.10))
 	elif enemy_type == "skeleton":
 		# Os des jambes
 		_draw_rect(img, hs - 6, hs + 16, 3, 10, Color(0.78, 0.82, 0.78))
@@ -1239,35 +1236,45 @@ func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, e
 		_draw_rect(img, hs - 8, hs + 24, 6, 3, Color(0.75, 0.78, 0.75))
 		_draw_rect(img, hs + 2, hs + 24, 6, 3, Color(0.75, 0.78, 0.75))
 	elif enemy_type == "swordsman":
-		# Bottes métalliques
-		_draw_gradient_rect(img, hs - 8, hs + 16, 6, 10, Color(0.48, 0.51, 0.60), Color(0.38, 0.41, 0.50))
-		_draw_gradient_rect(img, hs + 2, hs + 16, 6, 10, Color(0.48, 0.51, 0.60), Color(0.38, 0.41, 0.50))
-		# Rebots
-		_draw_rect(img, hs - 9, hs + 24, 8, 3, Color(0.35, 0.38, 0.48))
-		_draw_rect(img, hs + 1, hs + 24, 8, 3, Color(0.35, 0.38, 0.48))
+		# Hakama (pantalon samurai)
+		_draw_gradient_rect(img, hs - 8, hs + 16, 6, 10, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
+		_draw_gradient_rect(img, hs + 2, hs + 16, 6, 10, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
+		# Geta (sandales en bois)
+		_draw_rect(img, hs - 9, hs + 24, 8, 3, Color(0.35, 0.25, 0.18))
+		_draw_rect(img, hs + 1, hs + 24, 8, 3, Color(0.35, 0.25, 0.18))
+		# Dents des geta
+		_draw_rect(img, hs - 6, hs + 26, 2, 2, Color(0.35, 0.25, 0.18))
+		_draw_rect(img, hs + 4, hs + 26, 2, 2, Color(0.35, 0.25, 0.18))
 	elif enemy_type == "archer":
-		# Bottes en cuir
-		_draw_gradient_rect(img, hs - 7, hs + 16, 5, 10, Color(0.30, 0.15, 0.08), Color(0.18, 0.08, 0.04))
-		_draw_gradient_rect(img, hs + 2, hs + 16, 5, 10, Color(0.30, 0.15, 0.08), Color(0.18, 0.08, 0.04))
+		# Hakama (pantalon archer)
+		_draw_gradient_rect(img, hs - 7, hs + 16, 5, 10, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
+		_draw_gradient_rect(img, hs + 2, hs + 16, 5, 10, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
+		# Tabi (chaussettes)
+		_draw_rect(img, hs - 8, hs + 24, 6, 3, Color(0.90, 0.90, 0.88))
+		_draw_rect(img, hs + 2, hs + 24, 6, 3, Color(0.90, 0.90, 0.88))
 	
-	# Armes ultra-détaillées
+	# Armes japonaises détaillées
 	if enemy_type == "skeleton":
-		# Épée rouillée à droite avec garde détaillée
+		# Katana rouillée à droite
 		_draw_gradient_rect(img, hs + 18, hs - 6, 5, 26, Color(0.72, 0.75, 0.80), Color(0.55, 0.58, 0.62))
 		_draw_rect(img, hs + 20, hs - 6, 2, 26, Color(0.82, 0.85, 0.90))  # Tranchant
-		_draw_rect(img, hs + 16, hs - 10, 9, 6, Color(0.55, 0.55, 0.60))  # Garde
-		_draw_rect(img, hs + 17, hs + 14, 7, 3, Color(0.45, 0.35, 0.25))  # Poignée
-		_draw_rect(img, hs + 19, hs + 18, 3, 3, Color(0.65, 0.55, 0.30))  # Pommeau
+		_draw_rect(img, hs + 16, hs - 10, 9, 6, Color(0.55, 0.55, 0.60))  # Tsuba (garde)
+		_draw_rect(img, hs + 17, hs + 14, 7, 3, Color(0.45, 0.35, 0.25))  # Tsuka (poignée)
+		_draw_rect(img, hs + 19, hs + 18, 3, 3, Color(0.65, 0.55, 0.30))  # Kashira (pommeau)
 		# Rouille sur la lame
 		_draw_rect(img, hs + 19, hs + 2, 2, 4, Color(0.55, 0.30, 0.15))
 		_draw_rect(img, hs + 18, hs - 4, 2, 3, Color(0.55, 0.30, 0.15))
 	elif enemy_type == "goblin":
-		# Hache massive à droite avec manche en bois
+		# Kanabo (massue à pointes d'Oni)
 		_draw_rect(img, hs + 20, hs - 8, 4, 26, Color(0.42, 0.28, 0.15))  # Manche
 		_draw_rect(img, hs + 18, hs - 12, 8, 10, Color(0.55, 0.55, 0.60))  # Lame haut
 		_draw_rect(img, hs + 18, hs - 2, 8, 10, Color(0.55, 0.55, 0.60))  # Lame bas
 		_draw_rect(img, hs + 20, hs - 14, 4, 14, Color(0.65, 0.65, 0.70))  # Tranchant
-		# Sang sur la hache
+		# Pointes (spikes)
+		for sy in [hs - 10, hs - 4, hs + 2]:
+			_draw_rect(img, hs + 16, sy, 3, 3, Color(0.75, 0.75, 0.80))
+			_draw_rect(img, hs + 23, sy, 3, 3, Color(0.75, 0.75, 0.80))
+		# Sang sur la massue
 		_draw_rect(img, hs + 19, hs - 10, 2, 3, Color(0.75, 0.10, 0.10))
 	elif enemy_type == "archer":
 		# Arc en bois courbé
@@ -1285,15 +1292,51 @@ func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, e
 			_draw_rect(img, hs - 18, fy, 2, 8, Color(0.48, 0.38, 0.28))
 			_draw_rect(img, hs - 16, fy - 2, 2, 2, Color(0.55, 0.55, 0.60))
 	elif enemy_type == "swordsman":
-		# Grande épée longue à droite
-		_draw_gradient_rect(img, hs + 20, hs - 14, 7, 36, Color(0.82, 0.85, 0.92), Color(0.62, 0.65, 0.75))
-		_draw_rect(img, hs + 22, hs - 14, 3, 36, Color(0.92, 0.95, 1.0))  # Tranchant
-		# Reflets sur la lame
+		# Katana brillant à droite
+		_draw_gradient_rect(img, hs + 18, hs - 8, 5, 28, Color(0.85, 0.82, 0.78), Color(0.70, 0.68, 0.65))
+		_draw_rect(img, hs + 20, hs - 8, 2, 28, Color(0.92, 0.90, 0.88))  # Tranchant brillant
+		_draw_rect(img, hs + 16, hs - 12, 9, 6, Color(0.85, 0.25, 0.25))  # Tsuba (garde vermilion)
+		_draw_rect(img, hs + 17, hs + 16, 7, 4, Color(0.35, 0.25, 0.18))  # Tsuka (poignée en bois)
+		# Same (tressage de la poignée)
+		for ty in [hs + 17, hs + 19]:
+			_draw_rect(img, hs + 17, ty, 7, 1, Color(0.25, 0.15, 0.10))
+		_draw_rect(img, hs + 19, hs + 18, 3, 3, Color(0.85, 0.25, 0.25))  # Kashira (pommeau vermilion)
+		# Menuki (décorations sur la poignée)
+		_draw_circle(img, hs + 20, hs + 18, 1, Color(0.95, 0.85, 0.20))
 		_draw_rect(img, hs + 21, hs - 10, 1, 8, Color(1.0, 1.0, 1.0))
 		_draw_rect(img, hs + 23, hs, 1, 6, Color(1.0, 1.0, 1.0))
+	elif enemy_type == "tengu":
+		# Éventail plié (tessen)
+		_draw_rect(img, hs + 18, hs - 4, 4, 20, Color(0.35, 0.25, 0.18))
+		_draw_rect(img, hs + 16, hs - 2, 2, 16, Color(0.85, 0.65, 0.15))
+		_draw_rect(img, hs + 20, hs - 2, 2, 16, Color(0.85, 0.65, 0.15))
+		# Plumes de l'éventail
+		for fy in [hs - 2, hs + 6, hs + 14]:
+			_draw_rect(img, hs + 22, fy, 3, 2, Color(0.45, 0.35, 0.25))
+	elif enemy_type == "kappa":
+		# Éventail plié
+		_draw_rect(img, hs + 18, hs - 4, 4, 20, Color(0.35, 0.25, 0.18))
+		_draw_rect(img, hs + 16, hs - 2, 2, 16, Color(0.30, 0.60, 0.70))
+		_draw_rect(img, hs + 20, hs - 2, 2, 16, Color(0.30, 0.60, 0.70))
+	elif enemy_type == "ninja":
+		# Kunai dans la main
+		_draw_rect(img, hs + 18, hs - 2, 3, 16, Color(0.55, 0.55, 0.60))
+		_draw_triangle(img, hs + 18, hs - 6, hs + 21, hs - 10, hs + 21, hs - 2, Color(0.55, 0.55, 0.60))
+		# Shuriken (étoile)
+		_draw_rect(img, hs + 22, hs + 8, 8, 2, Color(0.55, 0.55, 0.60))
+		_draw_rect(img, hs + 24, hs + 4, 2, 8, Color(0.55, 0.55, 0.60))
+	elif enemy_type == "monk":
+		# Bâton de moine (shakujō)
+		_draw_rect(img, hs + 18, hs - 8, 4, 28, Color(0.55, 0.45, 0.30))
+		_draw_rect(img, hs + 19, hs - 8, 2, 28, Color(0.65, 0.55, 0.40))
+		# Anneaux métalliques
+		for ry in [hs - 4, hs + 4, hs + 12]:
+			_draw_circle(img, hs + 20, ry, 3, Color(0.75, 0.72, 0.68))
+			_draw_circle(img, hs + 20, ry, 2, Color(0.55, 0.55, 0.60))
 		# Garde ornementée
 		_draw_rect(img, hs + 16, hs + 18, 14, 5, Color(0.48, 0.42, 0.28))
 		_draw_rect(img, hs + 18, hs + 16, 10, 3, Color(0.62, 0.55, 0.38))
+		# Bouclier à gauche (swordsman uniquement)
 		# Poignée
 		_draw_rect(img, hs + 22, hs + 23, 3, 10, Color(0.42, 0.28, 0.15))
 		# Pommeau sphérique
@@ -1338,12 +1381,12 @@ func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, e
 					if existing.a < 0.1:
 						img.set_pixel(x, y, Color(0.20, 0.55, 0.10, 0.12))
 
-# --- HÉROS 64x64 ULTRA-DÉTAILLÉ (style Age of Empires / HoMM3) ---
+# --- HÉROS JAPONAIS 64x64 ---
 func _generate_hero_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
 	var s: int = size
 	var hs: int = s / 2
 	
-	# 1. OMBRE ELLIPTIQUE RÉALISTE
+	# Ombre elliptique
 	for x in range(s):
 		for y in range(s):
 			var ox: float = (x - hs) / 16.0
@@ -1353,198 +1396,79 @@ func _generate_hero_sprite(img: Image, size: int, rng: RandomNumberGenerator) ->
 				var alpha: float = 0.30 * (1.0 - dist * 0.5)
 				img.set_pixel(x, y, Color(0, 0, 0, alpha))
 	
-	# 2. CAPE ROUGE LUXURIEUSE (avec plis et ombrage)
-	# Cape gauche (ombre)
-	_draw_gradient_rect(img, hs - 22, hs + 4, 10, 26, Color(0.45, 0.06, 0.06), Color(0.35, 0.04, 0.04))
-	# Cape droite (lumière)
-	_draw_gradient_rect(img, hs + 12, hs + 4, 10, 26, Color(0.70, 0.08, 0.08), Color(0.55, 0.06, 0.06))
-	# Cape centre
-	_draw_gradient_rect(img, hs - 14, hs + 6, 28, 24, Color(0.62, 0.08, 0.08), Color(0.50, 0.06, 0.06))
-	# Plis de la cape
-	for pli_y in [hs + 10, hs + 16, hs + 22]:
-		_draw_rect(img, hs - 12, pli_y, 24, 2, Color(0.40, 0.05, 0.05))
-		_draw_rect(img, hs - 10, pli_y + 1, 20, 1, Color(0.75, 0.12, 0.12))
-	# Bordure dorée de la cape
-	_add_bevel(img, hs - 14, hs + 6, 28, 24, Color(0.85, 0.72, 0.20), Color(0.35, 0.04, 0.04))
+	# Corps (kimono sombre avec armure)
+	_draw_shaded_circle(img, hs, hs + 8, 18, Color(0.35, 0.25, 0.18), Vector2(-0.3, -0.8))
+	_add_noise_to_rect(img, hs - 10, hs - 2, 20, 20, Color(0.35, 0.25, 0.18), 0.04, rng)
 	
-	# 3. JAMBES / BOTTES
-	# Botte gauche
-	_draw_gradient_rect(img, hs - 10, hs + 20, 7, 14, Color(0.32, 0.20, 0.12), Color(0.22, 0.12, 0.06))
-	_draw_rect(img, hs - 10, hs + 28, 7, 3, Color(0.42, 0.28, 0.16))  # Rebot
-	_draw_rect(img, hs - 9, hs + 22, 2, 8, Color(0.55, 0.38, 0.22))  # Lacet
-	# Botte droite
-	_draw_gradient_rect(img, hs + 3, hs + 20, 7, 14, Color(0.35, 0.22, 0.14), Color(0.25, 0.14, 0.08))
-	_draw_rect(img, hs + 3, hs + 28, 7, 3, Color(0.45, 0.30, 0.18))  # Rebot
-	_draw_rect(img, hs + 4, hs + 22, 2, 8, Color(0.58, 0.40, 0.24))  # Lacet
+	# Armure de poitrine (do) - lames laquées noires
+	_draw_shaded_circle(img, hs, hs + 2, 14, Color(0.12, 0.08, 0.06), Vector2(-0.5, -0.8))
+	_draw_gradient_rect(img, hs - 8, hs - 2, 16, 16, Color(0.15, 0.10, 0.08), Color(0.08, 0.05, 0.04))
+	_add_bevel(img, hs - 8, hs - 2, 16, 16, Color(0.20, 0.12, 0.08), Color(0.06, 0.04, 0.02))
+	# Bordures vermilion
+	_draw_rect(img, hs - 8, hs - 2, 16, 2, Color(0.85, 0.25, 0.25))
+	_draw_rect(img, hs - 8, hs + 14, 16, 2, Color(0.85, 0.25, 0.25))
+	# Mon (crest) au centre
+	_draw_circle(img, hs, hs + 6, 4, Color(0.85, 0.25, 0.25))
+	_draw_circle(img, hs, hs + 6, 2, Color(0.95, 0.85, 0.20))
 	
-	# 4. ARMURE DE PLAQUES DORÉE (corps)
-	# Base métallique avec dégradé
-	_draw_shaded_circle(img, hs, hs + 2, 16, Color(0.78, 0.68, 0.38), Vector2(-0.5, -0.8))
-	# Pectoral (plastron)
-	_draw_gradient_rect(img, hs - 10, hs - 4, 20, 18, Color(0.82, 0.72, 0.42), Color(0.68, 0.58, 0.28))
-	# Bordures de l'armure
-	_add_bevel(img, hs - 10, hs - 4, 20, 18, Color(0.92, 0.82, 0.52), Color(0.55, 0.45, 0.22))
-	# Rivets
-	for rivet_y in [hs - 2, hs + 4, hs + 10]:
-		for rivet_x in [hs - 8, hs + 8]:
-			_draw_rect(img, rivet_x - 1, rivet_y - 1, 3, 3, Color(0.55, 0.50, 0.30))
-			_draw_rect(img, rivet_x, rivet_y, 1, 1, Color(0.95, 0.90, 0.70))
-	# Croix rouge écarlate sur le plastron
-	_draw_rect(img, hs - 2, hs - 2, 4, 14, Color(0.78, 0.08, 0.08))
-	_draw_rect(img, hs - 6, hs + 3, 12, 4, Color(0.78, 0.08, 0.08))
-	# Contour doré de la croix
-	_add_bevel(img, hs - 2, hs - 2, 4, 14, Color(0.90, 0.80, 0.50), Color(0.50, 0.40, 0.20))
+	# Épaulettes (sode)
+	_draw_gradient_rect(img, hs - 16, hs - 4, 8, 12, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
+	_draw_rect(img, hs - 16, hs - 4, 8, 2, Color(0.85, 0.25, 0.25))
+	_draw_gradient_rect(img, hs + 8, hs - 4, 8, 12, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
+	_draw_rect(img, hs + 8, hs - 4, 8, 2, Color(0.85, 0.25, 0.25))
 	
-	# 5. CEINTURE
-	_draw_rect(img, hs - 11, hs + 10, 22, 4, Color(0.35, 0.22, 0.12))
-	_draw_rect(img, hs - 3, hs + 8, 6, 8, Color(0.45, 0.35, 0.18))  # Boucle
-	_draw_rect(img, hs - 1, hs + 10, 2, 4, Color(0.85, 0.72, 0.20))  # Ornement boucle
-	# Dague à la ceinture
-	_draw_rect(img, hs + 8, hs + 8, 3, 10, Color(0.82, 0.85, 0.92))
-	_draw_rect(img, hs + 7, hs + 6, 5, 3, Color(0.55, 0.45, 0.25))
+	# Tête (peau japonaise)
+	_draw_shaded_circle(img, hs, hs - 12, 14, Color(0.90, 0.75, 0.60), Vector2(-0.3, -0.8))
+	_draw_shaded_circle(img, hs - 3, hs - 15, 10, Color(0.92, 0.78, 0.65), Vector2(-0.3, -0.8))
 	
-	# 6. BRAS GAUCHE (bouclier)
-	_draw_gradient_rect(img, hs - 22, hs - 2, 8, 16, Color(0.72, 0.62, 0.32), Color(0.58, 0.48, 0.22))
-	_add_bevel(img, hs - 22, hs - 2, 8, 16, Color(0.85, 0.75, 0.45), Color(0.50, 0.40, 0.18))
-	# Gantelets
-	_draw_rect(img, hs - 22, hs + 10, 8, 5, Color(0.55, 0.48, 0.28))
-	_draw_rect(img, hs - 21, hs + 8, 6, 3, Color(0.45, 0.38, 0.20))
+	# Casque samurai (kabuto) avec crête
+	_draw_gradient_rect(img, hs - 12, hs - 24, 24, 12, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
+	_draw_rect(img, hs - 2, hs - 30, 4, 8, Color(0.85, 0.25, 0.25))  # Crête vermilion
+	# Visière (mempo)
+	_draw_gradient_rect(img, hs - 10, hs - 16, 20, 6, Color(0.15, 0.10, 0.08), Color(0.10, 0.06, 0.04))
+	# Chignon samurai
+	_draw_circle(img, hs + 8, hs - 20, 4, Color(0.06, 0.04, 0.02))
 	
-	# 7. BRAS DROIT (épée)
-	_draw_gradient_rect(img, hs + 14, hs - 2, 8, 16, Color(0.75, 0.65, 0.35), Color(0.60, 0.50, 0.25))
-	_add_bevel(img, hs + 14, hs - 2, 8, 16, Color(0.88, 0.78, 0.48), Color(0.52, 0.42, 0.20))
-	# Gantelets
-	_draw_rect(img, hs + 14, hs + 10, 8, 5, Color(0.58, 0.50, 0.30))
-	_draw_rect(img, hs + 15, hs + 8, 6, 3, Color(0.48, 0.40, 0.22))
+	# Cheveux noirs visibles sous le casque
+	_draw_shaded_circle(img, hs, hs - 18, 12, Color(0.06, 0.04, 0.02), Vector2(-0.3, -0.8))
+	_draw_circle(img, hs + 6, hs - 22, 5, Color(0.06, 0.04, 0.02))  # Chignon
 	
-	# 8. BOUCLIER HÉRALDIQUE (gauche)
-	# Forme bouclier (ovale vertical)
-	for x in range(hs - 28, hs - 8):
-		for y in range(hs - 6, hs + 18):
-			var dx: float = float(x - (hs - 18)) / 10.0
-			var dy: float = float(y - (hs + 6)) / 12.0
-			if dx * dx + dy * dy <= 1.0:
-				var c: Color = Color(0.52, 0.55, 0.65)
-				# Dégradé radial
-				var t: float = (dx * dx + dy * dy)
-				c.r = lerp(0.62, 0.42, t)
-				c.g = lerp(0.65, 0.45, t)
-				c.b = lerp(0.75, 0.55, t)
-				img.set_pixel(x, y, c)
-	# Bordure bouclier
-	for x in range(hs - 28, hs - 8):
-		for y in range(hs - 6, hs + 18):
-			var dx: float = float(x - (hs - 18)) / 10.0
-			var dy: float = float(y - (hs + 6)) / 12.0
-			var dist: float = dx * dx + dy * dy
-			if dist >= 0.75 and dist <= 1.0:
-				img.set_pixel(x, y, Color(0.85, 0.72, 0.20))
-	# Blason (croix rouge)
-	_draw_rect(img, hs - 19, hs + 4, 4, 10, Color(0.78, 0.08, 0.08))
-	_draw_rect(img, hs - 22, hs + 7, 10, 4, Color(0.78, 0.08, 0.08))
-	# Lion stylisé (jaune)
-	_draw_rect(img, hs - 18, hs + 3, 3, 3, Color(0.90, 0.80, 0.15))
-	_draw_rect(img, hs - 17, hs + 2, 1, 2, Color(0.90, 0.80, 0.15))
+	# Yeux détaillés
+	_draw_shaded_circle(img, hs - 5, hs - 14, 4, Color(0.95, 0.95, 0.95), Vector2(-0.2, -0.2))
+	_draw_shaded_circle(img, hs + 5, hs - 14, 4, Color(0.95, 0.95, 0.95), Vector2(-0.2, -0.2))
+	_draw_circle(img, hs - 5, hs - 14, 3, Color(0.12, 0.08, 0.06))
+	_draw_circle(img, hs + 5, hs - 14, 3, Color(0.12, 0.08, 0.06))
+	_draw_rect(img, hs - 6, hs - 15, 2, 2, Color(0.05, 0.05, 0.05))
+	_draw_rect(img, hs + 4, hs - 15, 2, 2, Color(0.05, 0.05, 0.05))
+	_draw_rect(img, hs - 4, hs - 15, 1, 1, Color(1, 1, 1))
+	_draw_rect(img, hs + 5, hs - 15, 1, 1, Color(1, 1, 1))
 	
-	# 9. ÉPÉE MASSIVE (droite)
-	# Lame (acier brillant avec reflets)
-	_draw_gradient_rect(img, hs + 22, hs - 28, 6, 38, Color(0.92, 0.95, 1.0), Color(0.68, 0.72, 0.82))
-	# Tranchant (plus clair)
-	_draw_rect(img, hs + 24, hs - 28, 2, 38, Color(0.98, 0.98, 1.0))
-	# Reflets sur la lame
-	_draw_rect(img, hs + 23, hs - 20, 1, 8, Color(1.0, 1.0, 1.0))
-	_draw_rect(img, hs + 25, hs - 10, 1, 6, Color(1.0, 1.0, 1.0))
-	# Garde (ornementée)
-	_draw_rect(img, hs + 18, hs + 8, 14, 4, Color(0.55, 0.45, 0.25))
-	_draw_rect(img, hs + 20, hs + 6, 10, 2, Color(0.72, 0.62, 0.32))
-	# Pommeau (sphère dorée)
-	_draw_shaded_circle(img, hs + 25, hs + 16, 5, Color(0.82, 0.72, 0.38), Vector2(-0.5, -0.5))
-	
-	# 10. TÊTE ET CASQUE
-	# Cou
-	_draw_gradient_rect(img, hs - 5, hs - 8, 10, 6, Color(0.82, 0.68, 0.52), Color(0.72, 0.58, 0.42))
-	# Visage (peau)
-	_draw_shaded_circle(img, hs, hs - 14, 12, Color(0.90, 0.75, 0.58), Vector2(-0.4, -0.6))
-	# Joues (rose)
-	_draw_circle(img, hs - 5, hs - 10, 3, Color(0.95, 0.70, 0.60))
-	_draw_circle(img, hs + 5, hs - 10, 3, Color(0.95, 0.70, 0.60))
-	# Nez
-	_draw_rect(img, hs - 1, hs - 12, 2, 4, Color(0.85, 0.65, 0.45))
-	_draw_rect(img, hs - 1, hs - 10, 2, 1, Color(0.75, 0.55, 0.38))
 	# Bouche
-	_draw_rect(img, hs - 3, hs - 6, 6, 2, Color(0.65, 0.35, 0.30))
-	_draw_rect(img, hs - 2, hs - 6, 4, 1, Color(0.80, 0.45, 0.40))
+	_draw_rect(img, hs - 3, hs - 6, 6, 2, Color(0.12, 0.08, 0.06))
+	_draw_rect(img, hs - 2, hs - 6, 4, 1, Color(0.75, 0.25, 0.20))
 	
-	# 11. BARBE BLONDE LUXURIANTE
-	# Barbe principale
-	for by in range(hs - 8, hs + 4):
-		var bw: int = int(lerp(12.0, 4.0, float(by - (hs - 8)) / 12.0))
-		_draw_rect(img, hs - bw / 2, by, bw, 2, Color(0.72, 0.58, 0.28))
-	# Moustache
-	_draw_rect(img, hs - 6, hs - 8, 12, 3, Color(0.78, 0.62, 0.32))
-	_draw_rect(img, hs - 4, hs - 9, 8, 2, Color(0.82, 0.66, 0.35))
-	# Reflets dans la barbe
-	_draw_rect(img, hs - 2, hs - 4, 4, 2, Color(0.88, 0.74, 0.42))
+	# Obi (ceinture vermilion)
+	_draw_rect(img, hs - 8, hs + 10, 16, 4, Color(0.85, 0.25, 0.25))
 	
-	# 12. CASQUE CHEVALIER (grand et imposant)
-	# Base du casque
-	_draw_rect(img, hs - 14, hs - 26, 28, 14, Color(0.50, 0.53, 0.63))
-	_draw_rect(img, hs - 12, hs - 30, 24, 6, Color(0.58, 0.62, 0.72))
-	# Crête du casque
-	_draw_rect(img, hs - 2, hs - 36, 4, 8, Color(0.65, 0.68, 0.78))
-	# Visière (levée)
-	_draw_rect(img, hs - 10, hs - 20, 20, 6, Color(0.42, 0.45, 0.55))
-	_draw_rect(img, hs - 8, hs - 22, 16, 4, Color(0.38, 0.42, 0.52))
-	# Reflets métalliques
-	_draw_rect(img, hs - 6, hs - 28, 4, 3, Color(0.82, 0.85, 0.92))
-	_draw_rect(img, hs + 4, hs - 26, 3, 2, Color(0.78, 0.82, 0.90))
-	# PLUME ROUGE DRAMATIQUE
-	# Tige
-	_draw_rect(img, hs + 8, hs - 36, 2, 16, Color(0.55, 0.45, 0.30))
-	# Plumes (plusieurs couches)
-	_draw_rect(img, hs + 6, hs - 42, 8, 8, Color(0.82, 0.10, 0.10))
-	_draw_rect(img, hs + 8, hs - 48, 6, 8, Color(0.88, 0.12, 0.12))
-	_draw_rect(img, hs + 10, hs - 54, 4, 8, Color(0.92, 0.14, 0.14))
-	_draw_rect(img, hs + 11, hs - 58, 2, 6, Color(0.95, 0.16, 0.16))
-	# Reflets dans la plume
-	_draw_rect(img, hs + 8, hs - 46, 2, 4, Color(0.98, 0.30, 0.30))
+	# Hakama (pantalon)
+	_draw_gradient_rect(img, hs - 8, hs + 16, 6, 10, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
+	_draw_gradient_rect(img, hs + 2, hs + 16, 6, 10, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
 	
-	# 13. YEUX (expressifs, visibles sous la visière)
-	# Blanches
-	_draw_shaded_circle(img, hs - 5, hs - 16, 4, Color(0.95, 0.95, 0.95), Vector2(-0.3, -0.3))
-	_draw_shaded_circle(img, hs + 5, hs - 16, 4, Color(0.95, 0.95, 0.95), Vector2(-0.3, -0.3))
-	# Iris bleu acier
-	_draw_circle(img, hs - 5, hs - 16, 3, Color(0.28, 0.42, 0.72))
-	_draw_circle(img, hs + 5, hs - 16, 3, Color(0.28, 0.42, 0.72))
-	# Pupilles
-	_draw_rect(img, hs - 6, hs - 17, 2, 2, Color(0.08, 0.08, 0.12))
-	_draw_rect(img, hs + 4, hs - 17, 2, 2, Color(0.08, 0.08, 0.12))
-	# Reflets brillants
-	_draw_rect(img, hs - 5, hs - 17, 1, 1, Color(1.0, 1.0, 1.0))
-	_draw_rect(img, hs + 5, hs - 17, 1, 1, Color(1.0, 1.0, 1.0))
-	# Sourcils blonds épais
-	_draw_rect(img, hs - 9, hs - 20, 8, 3, Color(0.75, 0.58, 0.25))
-	_draw_rect(img, hs + 1, hs - 20, 8, 3, Color(0.75, 0.58, 0.25))
+	# Tabi (chaussettes)
+	_draw_rect(img, hs - 8, hs + 24, 6, 3, Color(0.90, 0.90, 0.88))
+	_draw_rect(img, hs + 2, hs + 24, 6, 3, Color(0.90, 0.90, 0.88))
 	
-	# 14. DÉTAILS FINALS
-	# Épaulettes dorées
-	_draw_shaded_circle(img, hs - 16, hs - 2, 5, Color(0.82, 0.72, 0.38), Vector2(-0.5, -0.5))
-	_draw_shaded_circle(img, hs + 16, hs - 2, 5, Color(0.82, 0.72, 0.38), Vector2(-0.5, -0.5))
-	# Gemme sur le plastron
-	_draw_shaded_circle(img, hs, hs + 2, 3, Color(0.85, 0.15, 0.15), Vector2(-0.3, -0.3))
-	_draw_rect(img, hs - 1, hs + 1, 2, 2, Color(1.0, 0.40, 0.40))
-	
-	# 15. AURA / GLOW SUBTIL (halo doré autour du héros)
-	for x in range(hs - 22, hs + 22):
-		for y in range(hs - 38, hs + 32):
-			var dx: float = float(x - hs) / 20.0
-			var dy: float = float(y - (hs - 4)) / 22.0
-			var dist: float = sqrt(dx * dx + dy * dy)
-			if dist >= 0.9 and dist <= 1.0:
-				var existing: Color = img.get_pixel(x, y)
-				if existing.a < 0.1:
-					var glow_alpha: float = (1.0 - dist) * 0.25
-					img.set_pixel(x, y, Color(0.90, 0.80, 0.30, glow_alpha))
+	# Katana à droite
+	_draw_gradient_rect(img, hs + 18, hs - 8, 5, 28, Color(0.85, 0.82, 0.78), Color(0.70, 0.68, 0.65))
+	_draw_rect(img, hs + 20, hs - 8, 2, 28, Color(0.92, 0.90, 0.88))
+	_draw_rect(img, hs + 16, hs - 12, 9, 6, Color(0.85, 0.25, 0.25))
+	_draw_rect(img, hs + 17, hs + 16, 7, 4, Color(0.35, 0.25, 0.18))
+	for ty in [hs + 17, hs + 19]:
+		_draw_rect(img, hs + 17, ty, 7, 1, Color(0.25, 0.15, 0.10))
+	_draw_rect(img, hs + 19, hs + 18, 3, 3, Color(0.85, 0.25, 0.25))
+	_draw_circle(img, hs + 20, hs + 18, 1, Color(0.95, 0.85, 0.20))
+	_draw_rect(img, hs + 21, hs - 10, 1, 8, Color(1.0, 1.0, 1.0))
+	_draw_rect(img, hs + 23, hs, 1, 6, Color(1.0, 1.0, 1.0))
 
 # ============================================================
 # FIN GÉNÉRATEUR DE SPRITES
@@ -1556,11 +1480,12 @@ var _wood: int = 50
 var _ore: int = 25
 
 func _ready() -> void:
+	rng.randomize()
 	print("=== WORLD SIZE === ", _world_w, "x", _world_h)
 	print("=== ZONE SIZE === ", _zone_w, "x", _zone_h, " (toute la map colorée)")
 	print("=== VÉRIFICATION: _play_w = ", _play_w, " _play_h = ", _play_h)
 	
-	print("=== HoMM Mobile - Étape 10 : Niveau et Expérience ===")
+	print("=== HoMM3: Heroes of Conquest - Étape 10 : Niveau et Expérience ===")
 	print("Création de la carte avec TileMapLayer")
 	
 		
@@ -1582,7 +1507,7 @@ func _ready() -> void:
 	# Créer l'interface HoMM3 (inclut la minimap)
 	_create_ui()
 	
-	# === INITIALISATION SYSTÈMES HOMM ===
+	# === INITIALISATION SYSTÈMES HOMURA ===
 	_hero_mp = _hero_max_mp
 	_init_fog_of_war()
 	_init_enemy_armies()
@@ -1605,13 +1530,8 @@ func _ready() -> void:
 	print("✓ ", CITY_COUNT, " villes créées sur la carte")
 	print("✓ ", ENEMY_COUNT, " ennemis créés sur la carte")
 	print("✓ ", RESOURCE_COUNT, " ressources à collecter")
-	print("✓ ", TREASURE_COUNT, " coffres au trésor à découvrir")
-	print("✓ ", TREE_COUNT, " arbres, ", ROCK_COUNT, " rochers, ", TOWER_COUNT, " tours abandonnées")
-	print("✓ Héros créé - Niveau ", _hero_level, " (XP: ", _hero_xp, "/", _hero_xp_to_next, ")")
-	print("✓ Héros Stats - HP: ", _hero_hp, "/", _hero_max_hp, ", ATK: ", _hero_attack)
-	print("✓ Interface HoMM3 avec panneau latéral et cadres dorés")
-	print("✓ Minimap HoMM3 élaborée créée")
-	print("✓ Système HoMM initialisé: MP=", _hero_mp, "/", _hero_max_mp, ", Brouillard de guerre, Armées")
+	print("✓ Arbres créés : ", TREE_COUNT, " arbres avec forêts et groupes")
+	print("✓ Rochers créés : ", ROCK_COUNT, " rochers")
 	print("✓ Effet de sélection doré autour du héros")
 	print("✓ Prêt pour l'aventure !")
 
@@ -1641,6 +1561,7 @@ func _create_map() -> void:
 	_create_decorations()
 	_create_mountain_sprites()
 	_create_bridges()
+	_create_japanese_decorations()
 
 func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image:
 	"""Génère une tuile de terrain 64x64 avec texture détaillée procédurale"""
@@ -1648,10 +1569,10 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 	
 	match tile_type:
 		0, 5:  # Herbe / Prairie
-			# Fond herbe avec variations riches
-			var base_g: Color = Color(0.28, 0.50, 0.18)
+			# Fond herbe avec variations riches - style japonais (plus doux)
+			var base_g: Color = Color(0.32, 0.52, 0.28)
 			if tile_type == 5:
-				base_g = Color(0.40, 0.60, 0.26)
+				base_g = Color(0.38, 0.58, 0.32)
 			img.fill(base_g)
 			# Variations de ton (plus nombreuses)
 			for _i in range(120):
@@ -1670,9 +1591,9 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 				for dx in range(-4, 5):
 					for dy in range(-4, 5):
 						if dx*dx + dy*dy < 14 and rng.randf() < 0.55:
-							var tcol: Color = Color(0.16, 0.40, 0.08)
+							var tcol: Color = Color(0.22, 0.42, 0.12)
 							if rng.randf() < 0.35:
-								tcol = Color(0.20, 0.44, 0.12)
+								tcol = Color(0.26, 0.46, 0.16)
 							img.set_pixel(clamp(tx + dx, 0, TILE_SIZE - 1), clamp(ty + dy, 0, TILE_SIZE - 1), tcol)
 			# Touffes d'herbe claire (contrastes)
 			for _i in range(8):
@@ -1681,24 +1602,24 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 				for dx in range(-3, 4):
 					for dy in range(-3, 4):
 						if dx*dx + dy*dy < 8 and rng.randf() < 0.45:
-							var tcol: Color = Color(0.32, 0.56, 0.22)
+							var tcol: Color = Color(0.36, 0.58, 0.26)
 							if rng.randf() < 0.3:
-								tcol = Color(0.36, 0.62, 0.26)
+								tcol = Color(0.40, 0.64, 0.30)
 							img.set_pixel(clamp(tx + dx, 0, TILE_SIZE - 1), clamp(ty + dy, 0, TILE_SIZE - 1), tcol)
-			# Petites fleurs colorées
+			# Petites fleurs colorées (style japonais - sakura)
 			if rng.randf() < 0.5:
 				for _j in range(rng.randi_range(3, 8)):
 					var fx: int = rng.randi_range(8, TILE_SIZE - 10)
 					var fy: int = rng.randi_range(8, TILE_SIZE - 10)
 					var flower_type: float = rng.randf()
-					var fcol: Color = Color(0.85, 0.78, 0.20)
+					var fcol: Color = Color(0.95, 0.85, 0.20)
 					if flower_type < 0.33:
-						fcol = Color(0.82, 0.25, 0.28)
+						fcol = Color(0.92, 0.35, 0.38)  # Rose sakura
 					elif flower_type < 0.66:
-						fcol = Color(0.72, 0.55, 0.82)
+						fcol = Color(0.82, 0.65, 0.92)  # Lavande
 					img.set_pixel(fx, fy, fcol)
 					img.set_pixel(fx + 1, fy, fcol)
-					img.set_pixel(fx, fy + 1, Color(0.20, 0.42, 0.12))
+					img.set_pixel(fx, fy + 1, Color(0.22, 0.44, 0.14))
 			# Petits cailloux
 			for _i in range(4):
 				var cx: int = rng.randi_range(4, TILE_SIZE - 6)
@@ -1710,9 +1631,9 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 			for _i in range(15):
 				var lx: int = rng.randi_range(0, TILE_SIZE - 1)
 				var ly: int = rng.randi_range(0, TILE_SIZE - 1)
-				var lcol: Color = Color(0.12, 0.35, 0.08)
+				var lcol: Color = Color(0.16, 0.38, 0.12)
 				if rng.randf() < 0.5:
-					lcol = Color(0.32, 0.55, 0.18)
+					lcol = Color(0.36, 0.58, 0.22)
 				img.set_pixel(lx, ly, lcol)
 				img.set_pixel(lx + 1, ly, lcol)
 			if rng.randf() < 0.4:
@@ -1720,16 +1641,16 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 				var py: int = rng.randi_range(8, TILE_SIZE - 12)
 				for pdx in range(2, 4):
 					for pdy in range(2, 3):
-						img.set_pixel(px + pdx, py + pdy, Color(0.30, 0.48, 0.18))
+						img.set_pixel(px + pdx, py + pdy, Color(0.34, 0.52, 0.22))
 		
 		1:  # Terre
-			img.fill(Color(0.55, 0.42, 0.28))
+			img.fill(Color(0.52, 0.40, 0.26))  # Terre plus douce style japonais
 			# Variations
 			for _i in range(120):
 				var tx: int = rng.randi_range(0, TILE_SIZE - 1)
 				var ty: int = rng.randi_range(0, TILE_SIZE - 1)
 				var dshade: float = rng.randf_range(-0.06, 0.04)
-				var dc: Color = Color(0.55 + dshade, 0.42 + dshade * 0.8, 0.28 + dshade * 0.6)
+				var dc: Color = Color(0.52 + dshade, 0.40 + dshade * 0.8, 0.26 + dshade * 0.6)
 				img.set_pixel(tx, ty, dc)
 			# Cailloux
 			for _i in range(5):
@@ -1750,30 +1671,30 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 				var fy: int = rng.randi_range(0, TILE_SIZE - 1)
 				for j in range(rng.randi_range(5, 12)):
 					if fx >= 0 and fx < TILE_SIZE and fy >= 0 and fy < TILE_SIZE:
-						img.set_pixel(fx, fy, Color(0.42, 0.35, 0.25))
+						img.set_pixel(fx, fy, Color(0.40, 0.33, 0.23))
 						fx += rng.randi_range(-1, 1)
 						fy += rng.randi_range(0, 1)
 
 		2:  # Eau
-			img.fill(Color(0.10, 0.32, 0.58))
+			img.fill(Color(0.12, 0.38, 0.62))  # Eau plus douce style japonais
 			# Reflets plus riches
 			for _i in range(30):
 				var rx = rng.randi_range(4, TILE_SIZE - 8)
 				var ry = rng.randi_range(4, TILE_SIZE - 8)
 				for dx in range(4):
-					img.set_pixel(rx + dx, ry, Color(0.20, 0.45, 0.72))
-					img.set_pixel(rx + dx, ry + 1, Color(0.15, 0.38, 0.65))
+					img.set_pixel(rx + dx, ry, Color(0.22, 0.50, 0.78))
+					img.set_pixel(rx + dx, ry + 1, Color(0.18, 0.42, 0.70))
 			# Profondeur
 			for _i in range(40):
 				var dx = rng.randi_range(0, TILE_SIZE - 1)
 				var dy = rng.randi_range(0, TILE_SIZE - 1)
-				img.set_pixel(dx, dy, Color(0.08, 0.28, 0.52))
+				img.set_pixel(dx, dy, Color(0.10, 0.34, 0.56))
 			# Bulles/écume
 			for _i in range(15):
 				var bx = rng.randi_range(0, TILE_SIZE - 1)
 				var by = rng.randi_range(0, TILE_SIZE - 1)
-				img.set_pixel(bx, by, Color(0.18, 0.48, 0.78, 0.6))
-				img.set_pixel(bx + 1, by, Color(0.15, 0.42, 0.72, 0.4))
+				img.set_pixel(bx, by, Color(0.20, 0.52, 0.82, 0.6))
+				img.set_pixel(bx + 1, by, Color(0.18, 0.46, 0.76, 0.4))
 			# Vagues légères
 			for x in range(TILE_SIZE):
 				for y in range(TILE_SIZE):
@@ -1781,7 +1702,7 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 						img.set_pixel(x, y, img.get_pixel(x, y).lightened(0.05))
 
 		3:  # Montagne
-			img.fill(Color(0.48, 0.46, 0.42))
+			img.fill(Color(0.50, 0.48, 0.44))
 			# Pierres
 			for _i in range(8):
 				var sx = rng.randi_range(4, TILE_SIZE - 10)
@@ -1789,7 +1710,7 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 				for dx in range(6):
 					for dy in range(6):
 						if (dx-3)*(dx-3) + (dy-3)*(dy-3) < 9:
-							img.set_pixel(sx+dx, sy+dy, Color(0.58, 0.56, 0.52))
+							img.set_pixel(sx+dx, sy+dy, Color(0.60, 0.58, 0.54))
 			# Neige sommités
 			for x in range(TILE_SIZE):
 				for y in range(12):
@@ -1801,7 +1722,7 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 			for _i in range(50):
 				var ox = rng.randi_range(0, TILE_SIZE - 1)
 				var oy = rng.randi_range(0, TILE_SIZE - 1)
-				img.set_pixel(ox, oy, Color(0.38, 0.36, 0.32))
+				img.set_pixel(ox, oy, Color(0.40, 0.38, 0.34))
 			# Minerais brillants
 			for _i in range(6):
 				var mx = rng.randi_range(0, TILE_SIZE - 1)
@@ -1886,17 +1807,17 @@ func _generate_map_image() -> ImageTexture:
 	var w: int = 60
 	var h: int = 40
 	
-	# === COULEURS HOMM3 (plus riches) ===
-	var C_GRASS: Color = Color(0.28, 0.50, 0.18)      # Herbe principale
-	var C_GRASS_LIGHT: Color = Color(0.40, 0.58, 0.26)  # Herbe claire/prairie
-	var C_DIRT: Color = Color(0.58, 0.48, 0.34)        # Terre/sable
-	var C_WATER: Color = Color(0.10, 0.32, 0.58)       # Eau profonde
-	var C_WATER_SHALLOW: Color = Color(0.14, 0.36, 0.62)  # Eau peu profonde
-	var C_MOUNTAIN: Color = Color(0.48, 0.46, 0.42)    # Montagne
-	var C_MOUNTAIN_DARK: Color = Color(0.38, 0.36, 0.32)  # Montagne sombre
-	var C_FOREST: Color = Color(0.12, 0.30, 0.10)      # Forêt dense
-	var C_SAND: Color = Color(0.72, 0.62, 0.46)        # Sable (bordure eau)
-	var C_ROCK: Color = Color(0.56, 0.52, 0.48)         # Roche (bordure montagne)
+	# === COULEURS JAPONAIS MÉDIÉVAL ===
+	var C_GRASS: Color = Color(0.25, 0.42, 0.18)      # Herbe principale (bamboo green muted)
+	var C_GRASS_LIGHT: Color = Color(0.35, 0.52, 0.26)  # Herbe claire/prairie
+	var C_DIRT: Color = Color(0.52, 0.42, 0.30)        # Terre/sable (warm earth)
+	var C_WATER: Color = Color(0.15, 0.28, 0.45)       # Eau profonde (indigo)
+	var C_WATER_SHALLOW: Color = Color(0.20, 0.35, 0.52)  # Eau peu profonde
+	var C_MOUNTAIN: Color = Color(0.45, 0.42, 0.40)    # Montagne (stone gray)
+	var C_MOUNTAIN_DARK: Color = Color(0.35, 0.32, 0.30)  # Montagne sombre
+	var C_FOREST: Color = Color(0.15, 0.28, 0.12)      # Forêt dense (deep green)
+	var C_SAND: Color = Color(0.65, 0.55, 0.42)        # Sable (bordure eau)
+	var C_ROCK: Color = Color(0.50, 0.46, 0.42)         # Roche (bordure montagne)
 	
 	var base_colors: Array[Color] = [C_GRASS, C_DIRT, C_WATER, C_MOUNTAIN, C_FOREST, C_GRASS_LIGHT]
 	
@@ -2553,6 +2474,274 @@ func _create_decorations() -> void:
 	
 	print("✓ ", TREE_COUNT, " arbres, ", ROCK_COUNT, " rochers et ", TOWER_COUNT, " tours créés")
 
+func _create_japanese_decorations() -> void:
+	"""Crée des éléments décoratifs japonais : torii, cerisiers, lanternes, temples"""
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.randomize()
+	
+	# Charger le sprite sheet de bâtiments japonais
+	var japanese_sheet: Texture2D = load("res://assets/bat.png")
+	
+	# Nombre d'éléments japonais
+	const TORII_COUNT: int = 5
+	const SAKURA_COUNT: int = 15
+	const LANTERN_COUNT: int = 20
+	const SHRINE_COUNT: int = 3
+	const BUILDING_COUNT: int = 12  # Bâtiments depuis le sprite sheet
+	
+		# === BÂTIMENTS JAPONAIS DU SPRITE SHEET ===
+	if japanese_sheet != null:
+		var sheet_size: Vector2 = japanese_sheet.get_size()
+		var cols: int = 4
+		var rows: int = 3
+		var building_width: float = sheet_size.x / cols
+		var building_height: float = sheet_size.y / rows
+		var margin_x: float = building_width * 0.05
+		var margin_y: float = building_height * 0.05
+		
+		for i in range(BUILDING_COUNT):
+			var tx: int = rng.randi_range(3, _zone_w - 4)
+			var ty: int = rng.randi_range(3, _zone_h - 4)
+			var world_x: float = (tx * TILE_SIZE) + TILE_SIZE / 2
+			var world_y: float = (ty * TILE_SIZE) + TILE_SIZE / 2
+			
+			var building_node: Node2D = Node2D.new()
+			building_node.name = "JapaneseBuilding_" + str(i)
+			building_node.position = Vector2(world_x, world_y)
+			add_child(building_node)
+			
+			var col: int = i % cols
+			var row: int = i / cols
+			
+			var atlas: AtlasTexture = AtlasTexture.new()
+			atlas.atlas = japanese_sheet
+			atlas.region = Rect2(col * building_width + margin_x, row * building_height + margin_y, building_width - margin_x * 2, building_height - margin_y * 2)
+			
+			var building_sprite: Sprite2D = Sprite2D.new()
+			building_sprite.texture = atlas
+			building_sprite.scale = Vector2(1.5, 1.5)
+			building_sprite.position = Vector2(0, -32)
+			building_node.add_child(building_sprite)
+			
+			building_node.set_z_index(-7)
+			_japanese_buildings.append(building_node)
+		
+		print("✓ Bâtiments japonais créés : ", BUILDING_COUNT)
+	else:
+		print("⚠ Impossible de charger bat.png")
+	
+	# === TORII GATES ===
+	for i in range(TORII_COUNT):
+		var tx: int = rng.randi_range(3, _zone_w - 4)
+		var ty: int = rng.randi_range(3, _zone_h - 4)
+		var world_x: float = (tx * TILE_SIZE) + TILE_SIZE / 2
+		var world_y: float = (ty * TILE_SIZE) + TILE_SIZE / 2
+		
+		var torii_node: Node2D = Node2D.new()
+		torii_node.name = "Torii_" + str(i)
+		torii_node.position = Vector2(world_x, world_y)
+		add_child(torii_node)
+		
+		# Piliers rouges
+		var pillar_left: ColorRect = ColorRect.new()
+		pillar_left.size = Vector2(8, 64)
+		pillar_left.position = Vector2(-24, -32)
+		pillar_left.color = Color(0.85, 0.15, 0.15)
+		torii_node.add_child(pillar_left)
+		
+		var pillar_right: ColorRect = ColorRect.new()
+		pillar_right.size = Vector2(8, 64)
+		pillar_right.position = Vector2(16, -32)
+		pillar_right.color = Color(0.85, 0.15, 0.15)
+		torii_node.add_child(pillar_right)
+		
+		# Poutre horizontale (kasagi)
+		var top_beam: ColorRect = ColorRect.new()
+		top_beam.size = Vector2(72, 8)
+		top_beam.position = Vector2(-36, -40)
+		top_beam.color = Color(0.85, 0.15, 0.15)
+		torii_node.add_child(top_beam)
+		
+		# Poutre secondaire (nuki)
+		var mid_beam: ColorRect = ColorRect.new()
+		mid_beam.size = Vector2(64, 6)
+		mid_beam.position = Vector2(-32, -24)
+		mid_beam.color = Color(0.75, 0.25, 0.15)
+		torii_node.add_child(mid_beam)
+		
+		# Extrémités courbées
+		var curve_left: ColorRect = ColorRect.new()
+		curve_left.size = Vector2(12, 12)
+		curve_left.position = Vector2(-44, -44)
+		curve_left.color = Color(0.85, 0.15, 0.15)
+		curve_left.rotation = -0.3
+		torii_node.add_child(curve_left)
+		
+		var curve_right: ColorRect = ColorRect.new()
+		curve_right.size = Vector2(12, 12)
+		curve_right.position = Vector2(32, -44)
+		curve_right.color = Color(0.85, 0.15, 0.15)
+		curve_right.rotation = 0.3
+		torii_node.add_child(curve_right)
+		
+		torii_node.set_z_index(-5)
+	
+	# === CERISIERS (SAKURA) ===
+	for i in range(SAKURA_COUNT):
+		var tx: int = rng.randi_range(2, _zone_w - 3)
+		var ty: int = rng.randi_range(2, _zone_h - 3)
+		var world_x: float = (tx * TILE_SIZE) + TILE_SIZE / 2
+		var world_y: float = (ty * TILE_SIZE) + TILE_SIZE / 2
+		
+		var sakura_node: Node2D = Node2D.new()
+		sakura_node.name = "Sakura_" + str(i)
+		sakura_node.position = Vector2(world_x, world_y)
+		add_child(sakura_node)
+		
+		# Tronc
+		var trunk: ColorRect = ColorRect.new()
+		trunk.size = Vector2(12, 40)
+		trunk.position = Vector2(-6, -20)
+		trunk.color = Color(0.45, 0.35, 0.25)
+		sakura_node.add_child(trunk)
+		
+		# Couronne de fleurs roses
+		var canopy: ColorRect = ColorRect.new()
+		canopy.size = Vector2(64, 48)
+		canopy.position = Vector2(-32, -56)
+		canopy.color = Color(0.95, 0.75, 0.85)
+		sakura_node.add_child(canopy)
+		
+		# Variations de couleur pour les fleurs
+		for _j in range(15):
+			var fx: int = rng.randi_range(-28, 28)
+			var fy: int = rng.randi_range(-52, -20)
+			var flower: ColorRect = ColorRect.new()
+			flower.size = Vector2(6, 6)
+			flower.position = Vector2(fx, fy)
+			flower.color = Color(1.0, 0.8, 0.9) if rng.randf() > 0.5 else Color(0.9, 0.6, 0.8)
+			sakura_node.add_child(flower)
+		
+		sakura_node.set_z_index(-3)
+	
+	# === LANTERNES DE PIERRE ===
+	for i in range(LANTERN_COUNT):
+		var tx: int = rng.randi_range(3, _zone_w - 4)
+		var ty: int = rng.randi_range(3, _zone_h - 4)
+		var world_x: float = (tx * TILE_SIZE) + TILE_SIZE / 2
+		var world_y: float = (ty * TILE_SIZE) + TILE_SIZE / 2
+		
+		var lantern_node: Node2D = Node2D.new()
+		lantern_node.name = "Lantern_" + str(i)
+		lantern_node.position = Vector2(world_x, world_y)
+		add_child(lantern_node)
+		
+		# Base
+		var base: ColorRect = ColorRect.new()
+		base.size = Vector2(16, 8)
+		base.position = Vector2(-8, -4)
+		base.color = Color(0.45, 0.45, 0.50)
+		lantern_node.add_child(base)
+		
+		# Corps de la lanterne
+		var body: ColorRect = ColorRect.new()
+		body.size = Vector2(12, 16)
+		body.position = Vector2(-6, -20)
+		body.color = Color(0.50, 0.50, 0.55)
+		lantern_node.add_child(body)
+		
+		# Toit
+		var roof: ColorRect = ColorRect.new()
+		roof.size = Vector2(18, 6)
+		roof.position = Vector2(-9, -26)
+		roof.color = Color(0.40, 0.40, 0.45)
+		lantern_node.add_child(roof)
+		
+		# Lumière (jaune pâle)
+		var light: ColorRect = ColorRect.new()
+		light.size = Vector2(8, 10)
+		light.position = Vector2(-4, -17)
+		light.color = Color(1.0, 0.95, 0.7)
+		lantern_node.add_child(light)
+		
+		lantern_node.set_z_index(-4)
+	
+	# === PETITS SANCTUAIRES ===
+	for i in range(SHRINE_COUNT):
+		var tx: int = rng.randi_range(4, _zone_w - 5)
+		var ty: int = rng.randi_range(4, _zone_h - 5)
+		var world_x: float = (tx * TILE_SIZE) + TILE_SIZE / 2
+		var world_y: float = (ty * TILE_SIZE) + TILE_SIZE / 2
+		
+		var shrine_node: Node2D = Node2D.new()
+		shrine_node.name = "Shrine_" + str(i)
+		shrine_node.position = Vector2(world_x, world_y)
+		add_child(shrine_node)
+		
+		# Base en pierre
+		var shrine_base: ColorRect = ColorRect.new()
+		shrine_base.size = Vector2(48, 12)
+		shrine_base.position = Vector2(-24, -6)
+		shrine_base.color = Color(0.55, 0.55, 0.60)
+		shrine_node.add_child(shrine_base)
+		
+		# Murs
+		var wall_left: ColorRect = ColorRect.new()
+		wall_left.size = Vector2(8, 24)
+		wall_left.position = Vector2(-20, -30)
+		wall_left.color = Color(0.85, 0.85, 0.80)
+		shrine_node.add_child(wall_left)
+		
+		var wall_right: ColorRect = ColorRect.new()
+		wall_right.size = Vector2(8, 24)
+		wall_right.position = Vector2(12, -30)
+		wall_right.color = Color(0.85, 0.85, 0.80)
+		shrine_node.add_child(wall_right)
+		
+		# Toit
+		var shrine_roof: ColorRect = ColorRect.new()
+		shrine_roof.size = Vector2(56, 10)
+		shrine_roof.position = Vector2(-28, -40)
+		shrine_roof.color = Color(0.65, 0.25, 0.15)
+		shrine_node.add_child(shrine_roof)
+		
+		# Porte
+		var door: ColorRect = ColorRect.new()
+		door.size = Vector2(12, 18)
+		door.position = Vector2(-6, -24)
+		door.color = Color(0.75, 0.35, 0.20)
+		shrine_node.add_child(door)
+		
+		shrine_node.set_z_index(-6)
+	
+	print("✓ Éléments japonais créés : ", TORII_COUNT, " torii, ", SAKURA_COUNT, " cerisiers, ", LANTERN_COUNT, " lanternes, ", SHRINE_COUNT, " sanctuaires")
+
+func _create_cherry_blossom_particles() -> void:
+	"""Crée des particules de pétales de cerisier qui tombent"""
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.randomize()
+	
+	for i in range(50):
+		var petal: ColorRect = ColorRect.new()
+		petal.name = "Petal_" + str(i)
+		petal.size = Vector2(4, 4)
+		petal.color = Color(1.0, 0.8, 0.9) if i % 2 == 0 else Color(0.9, 0.6, 0.8)
+		
+		var start_x: float = rng.randf_range(0, _world_w * TILE_SIZE)
+		var start_y: float = rng.randf_range(0, _world_h * TILE_SIZE)
+		petal.position = Vector2(start_x, start_y)
+		
+		add_child(petal)
+		_petals.append({
+			"node": petal,
+			"speed_y": rng.randf_range(0.5, 1.5),
+			"speed_x": rng.randf_range(-0.3, 0.3),
+			"rotation": rng.randf_range(-0.1, 0.1),
+			"rotation_speed": rng.randf_range(-0.05, 0.05)
+		})
+	
+	print("✓ Particules de pétales de cerisier créées : 50")
+
 func _create_mountain_sprites() -> void:
 	# Créer des sprites de montagnes sur les tuiles montagne (type 3)
 	# Les montagnes débordent sur les tuiles voisines pour un effet imposant
@@ -2946,7 +3135,7 @@ func _create_movement_indicator() -> void:
 	print("✓ Indicateur de portée créé (", move_range, " tuiles)")
 
 func _input(event: InputEvent) -> void:
-	# Déplacer le héros avec les clics de souris (système HoMM avec MP)
+	# Déplacer le héros avec les clics de souris (système HoMM3 avec MP)
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if _hero_mp <= 0:
 			print("⛔ Plus de Points de Mouvement ! Finissez le tour.")
@@ -3025,7 +3214,7 @@ func _input(event: InputEvent) -> void:
 			_camera.zoom = Vector2(new_zoom, new_zoom)
 			print("🔍 Zoom OUT: ", new_zoom)
 	
-	# Raccourcis clavier HoMM
+	# Raccourcis clavier HoMM3
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_T:
@@ -3098,17 +3287,35 @@ func _process(delta: float) -> void:
 		smoke.position.y = smoke_data["base_pos"].y - cycle * 20
 		# Dériver légèrement
 		smoke.position.x = smoke_data["base_pos"].x + sin(cycle * 6.28) * 3
-		# Grossir et s'estomper
-		var s_scale: float = 1.0 + cycle * 1.5
-		smoke.scale = Vector2(s_scale, s_scale)
-		smoke.modulate.a = 1.0 - cycle
+	
+	# Animation des pétales de cerisier
+	for petal_data in _petals:
+		var petal: ColorRect = petal_data["node"]
+		var speed_y: float = petal_data["speed_y"]
+		var speed_x: float = petal_data["speed_x"]
+		var rotation: float = petal_data["rotation"]
+		var rotation_speed: float = petal_data["rotation_speed"]
+		
+		# Déplacer le pétale
+		petal.position.y += speed_y * delta * 60
+		petal.position.x += speed_x * delta * 60 + sin(petal.position.y * 0.02) * 0.5
+		
+		# Rotation
+		petal.rotation += rotation_speed * delta * 60
+		
+		# Reset si hors écran
+		if petal.position.y > _world_h * TILE_SIZE:
+			petal.position.y = -10
+			petal.position.x = rng.randf_range(0, _world_w * TILE_SIZE)
+		if petal.position.x < -10 or petal.position.x > _world_w * TILE_SIZE + 10:
+			petal.position.x = rng.randf_range(0, _world_w * TILE_SIZE)
 	
 	# Mettre à jour la position de l'indicateur de mouvement pour qu'il suive le héros
 	if _movement_indicator != null and _hero != null:
 		_movement_indicator.position = _hero.position
 
 # ============================================================
-# SYSTÈME HOMM : BROUILLARD DE GUERRE
+# SYSTÈME HOMURA : BROUILLARD DE GUERRE
 # ============================================================
 func _init_fog_of_war() -> void:
 	"""Initialise la grille de brouillard de guerre"""
@@ -3143,7 +3350,7 @@ func _update_fog_of_war() -> void:
 	# Pour l'instant, le brouillard est logique (mémorisation du terrain)
 
 # ============================================================
-# SYSTÈME HOMM : ARMÉES ENNEMIES
+# SYSTÈME HOMURA : ARMÉES ENNEMIES
 # ============================================================
 func _init_enemy_armies() -> void:
 	"""Initialise les armées des ennemis avec composition variée"""
@@ -3175,7 +3382,7 @@ func _init_enemy_armies() -> void:
 	print("✓ ", _enemy_armies.size(), " armées ennemies initialisées")
 
 # ============================================================
-# SYSTÈME HOMM : FIN DE TOUR
+# SYSTÈME HOMURA : FIN DE TOUR
 # ============================================================
 func _create_end_turn_button() -> void:
 	"""Crée le bouton 'Fin de Tour' dans le panneau latéral"""
@@ -3350,7 +3557,7 @@ func _start_combat(enemy_index: int) -> void:
 	_current_enemy_index = enemy_index
 	var enemy_army: Array = _enemy_armies[enemy_index] if enemy_index < _enemy_armies.size() else []
 	
-	print("⚔️ COMBAT HOMM3 !")
+	print("⚔️ COMBAT HOMURA3 !")
 	print("   Votre armée vs Armée ennemie ", enemy_index + 1)
 	
 	# Lancer le Combat Manager
@@ -3563,27 +3770,27 @@ func _create_ui() -> void:
 	# Bordure haute
 	var top_bar: ColorRect = ColorRect.new()
 	top_bar.size = Vector2(1060, 6)
-	top_bar.color = Color(0.72, 0.52, 0.25)
+	top_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	frame_layer.add_child(top_bar)
 
 	# Bordure basse (séparation avec barre ressources)
 	var bot_bar: ColorRect = ColorRect.new()
 	bot_bar.size = Vector2(1060, 4)
 	bot_bar.position = Vector2(0, 671)
-	bot_bar.color = Color(0.72, 0.52, 0.25)
+	bot_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	frame_layer.add_child(bot_bar)
 
 	# Bordure gauche
 	var left_bar: ColorRect = ColorRect.new()
 	left_bar.size = Vector2(4, 675)
-	left_bar.color = Color(0.72, 0.52, 0.25)
+	left_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	frame_layer.add_child(left_bar)
 
 	# Bordure droite (séparation avec panneau latéral)
 	var right_bar: ColorRect = ColorRect.new()
 	right_bar.size = Vector2(4, 675)
 	right_bar.position = Vector2(1056, 0)
-	right_bar.color = Color(0.72, 0.52, 0.25)
+	right_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	frame_layer.add_child(right_bar)
 
 	# Coins dorés (carrés 8x8 aux 4 coins)
@@ -3593,17 +3800,17 @@ func _create_ui() -> void:
 		var cx: float = 0 if corner % 2 == 0 else 1052
 		var cy: float = 0 if corner < 2 else 667
 		c.position = Vector2(cx, cy)
-		c.color = Color(0.9, 0.7, 0.25)
+		c.color = Color(0.95, 0.85, 0.20)  # Or japonais
 		frame_layer.add_child(c)
 
-	# === PANNEAU DROIT (220 x 720) — style barre latérale HoMM3 ===
+	# === PANNEAU DROIT (220 x 720) — style japonais médiéval ===
 	var side_panel: Panel = Panel.new()
 	side_panel.name = "SidePanel"
 	side_panel.size = Vector2(220, 720)
 	side_panel.position = Vector2(1060, 0)
 	var side_style: StyleBoxFlat = StyleBoxFlat.new()
-	side_style.bg_color = Color(0.10, 0.07, 0.03)
-	side_style.border_color = Color(0.72, 0.52, 0.25)
+	side_style.bg_color = Color(0.08, 0.06, 0.05)  # Fond très sombre style laque noire
+	side_style.border_color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	side_style.border_width_left = 4
 	side_style.border_width_right = 4
 	side_style.border_width_top = 4
@@ -3621,50 +3828,50 @@ func _create_ui() -> void:
 	hero_block.size = Vector2(200, 200)  # Augmenté la hauteur pour plus d'espace
 	side_panel.add_child(hero_block)
 
-	# Portrait (style cadre doré HoMM3)
+	# Portrait (style cadre japonais avec vermilion)
 	var portrait_bg: Panel = _create_decorated_panel(Vector2(70, 70))
 	portrait_bg.position = Vector2(0, 0)
 	hero_block.add_child(portrait_bg)
+	
 	var portrait_rect: ColorRect = ColorRect.new()
 	portrait_rect.size = Vector2(60, 60)
 	portrait_rect.position = Vector2(5, 5)
 	portrait_rect.color = Color(0.18, 0.30, 0.50)
 	portrait_bg.add_child(portrait_rect)
+	
+	# Ajouter un motif japonais autour du portrait
+	var pattern_top: ColorRect = ColorRect.new()
+	pattern_top.size = Vector2(70, 4)
+	pattern_top.position = Vector2(0, 0)
+	pattern_top.color = Color(0.85, 0.25, 0.25)
+	portrait_bg.add_child(pattern_top)
+	
+	var pattern_bottom: ColorRect = ColorRect.new()
+	pattern_bottom.size = Vector2(70, 4)
+	pattern_bottom.position = Vector2(0, 66)
+	pattern_bottom.color = Color(0.85, 0.25, 0.25)
+	portrait_bg.add_child(pattern_bottom)
 
 	# Visage (peau)
 	var face: ColorRect = ColorRect.new()
 	face.size = Vector2(28, 24)
 	face.position = Vector2(16, 16)
-	face.color = Color(0.85, 0.70, 0.55)
+	face.color = Color(0.90, 0.75, 0.60)  # Teint plus clair style japonais
 	portrait_rect.add_child(face)
 
-	# Barbe
-	var beard: ColorRect = ColorRect.new()
-	beard.size = Vector2(20, 10)
-	beard.position = Vector2(20, 28)
-	beard.color = Color(0.45, 0.30, 0.15)
-	portrait_rect.add_child(beard)
+	# Cheveux noirs
+	var hair: ColorRect = ColorRect.new()
+	hair.size = Vector2(30, 12)
+	hair.position = Vector2(15, 8)
+	hair.color = Color(0.08, 0.05, 0.03)
+	portrait_rect.add_child(hair)
 
-	# Casque haut
-	var helmet_top: ColorRect = ColorRect.new()
-	helmet_top.size = Vector2(32, 14)
-	helmet_top.position = Vector2(14, 6)
-	helmet_top.color = Color(0.50, 0.55, 0.65)
-	portrait_rect.add_child(helmet_top)
-
-	# Casque front
-	var helmet_front: ColorRect = ColorRect.new()
-	helmet_front.size = Vector2(32, 6)
-	helmet_front.position = Vector2(14, 14)
-	helmet_front.color = Color(0.40, 0.45, 0.55)
-	portrait_rect.add_child(helmet_front)
-
-	# Plume rouge sur le casque
-	var plume: ColorRect = ColorRect.new()
-	plume.size = Vector2(4, 16)
-	plume.position = Vector2(28, 2)
-	plume.color = Color(0.8, 0.15, 0.1)
-	portrait_rect.add_child(plume)
+	# Chignon samurai
+	var topknot: ColorRect = ColorRect.new()
+	topknot.size = Vector2(8, 8)
+	topknot.position = Vector2(26, 6)
+	topknot.color = Color(0.06, 0.04, 0.02)
+	portrait_rect.add_child(topknot)
 
 	# Stats à droite du portrait
 	var stats_vbox: VBoxContainer = VBoxContainer.new()
@@ -3675,16 +3882,16 @@ func _create_ui() -> void:
 
 	# --- NOM DU HÉROS ---
 	_label_hero_name = Label.new()
-	_label_hero_name.text = "Votre Héros"
+	_label_hero_name.text = "Samurai"
 	_label_hero_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_label_hero_name.add_theme_color_override("font_color", Color(0.95, 0.85, 0.55))
+	_label_hero_name.add_theme_color_override("font_color", Color(0.95, 0.85, 0.75))
 	_label_hero_name.add_theme_font_size_override("font_size", 14)
 	stats_vbox.add_child(_label_hero_name)
 
 	# --- BARRE DE NIVEAU ---
 	_label_level = Label.new()
 	_label_level.text = "Niveau %d" % _hero_level
-	_label_level.add_theme_color_override("font_color", Color(0.95, 0.75, 0.35))
+	_label_level.add_theme_color_override("font_color", Color(0.95, 0.75, 0.55))
 	_label_level.add_theme_font_size_override("font_size", 13)
 	stats_vbox.add_child(_label_level)
 
@@ -3709,7 +3916,7 @@ func _create_ui() -> void:
 	_xp_bar_fill = ColorRect.new()
 	_xp_bar_fill.position = Vector2(3, 3)
 	_xp_bar_fill.size = Vector2(104 * float(_hero_xp) / _hero_xp_to_next, 14)
-	_xp_bar_fill.color = Color(0.85, 0.65, 0.15)
+	_xp_bar_fill.color = Color(0.95, 0.45, 0.55)  # Sakura pink
 	xp_panel.add_child(_xp_bar_fill)
 
 	_label_xp = Label.new()
@@ -3718,7 +3925,7 @@ func _create_ui() -> void:
 	_label_xp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_label_xp.text = "%d / %d XP" % [_hero_xp, _hero_xp_to_next]
 	_label_xp.add_theme_font_size_override("font_size", 10)
-	_label_xp.add_theme_color_override("font_color", Color(0.95, 0.9, 0.8))
+	_label_xp.add_theme_color_override("font_color", Color(0.95, 0.85, 0.80))
 	xp_panel.add_child(_label_xp)
 
 	# --- BARRE DE HP ---
@@ -3744,11 +3951,11 @@ func _create_ui() -> void:
 	var hp_ratio = float(_hero_hp) / _hero_max_hp if _hero_max_hp > 0 else 0
 	_hp_bar_fill.size = Vector2(104 * hp_ratio, 14)
 	if hp_ratio > 0.5:
-		_hp_bar_fill.color = Color(0.2, 0.7, 0.25)
+		_hp_bar_fill.color = Color(0.25, 0.55, 0.35)  # Bamboo green
 	elif hp_ratio > 0.25:
-		_hp_bar_fill.color = Color(0.85, 0.55, 0.1)
+		_hp_bar_fill.color = Color(0.85, 0.55, 0.15)
 	else:
-		_hp_bar_fill.color = Color(0.8, 0.15, 0.15)
+		_hp_bar_fill.color = Color(0.85, 0.25, 0.25)  # Vermilion
 	hp_panel.add_child(_hp_bar_fill)
 
 	_label_hp = Label.new()
@@ -3763,7 +3970,7 @@ func _create_ui() -> void:
 	# --- ATK / DEF ---
 	var atk_def_label: Label = Label.new()
 	atk_def_label.text = "ATK %d   DEF %d" % [_hero_attack, _hero_defense]
-	atk_def_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.9))
+	atk_def_label.add_theme_color_override("font_color", Color(0.65, 0.65, 0.85))  # Indigo
 	atk_def_label.add_theme_font_size_override("font_size", 12)
 	atk_def_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	stats_vbox.add_child(atk_def_label)
@@ -3823,7 +4030,7 @@ func _create_ui() -> void:
 	mp_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	var mp_label = Label.new()
 	mp_label.text = "MP %d / %d" % [_hero_mp, _hero_max_mp]
-	mp_label.add_theme_color_override("font_color", Color(0.2, 0.9, 0.4))
+	mp_label.add_theme_color_override("font_color", Color(0.35, 0.65, 0.45))  # Matcha green
 	mp_label.add_theme_font_size_override("font_size", 12)
 	mp_row.add_child(mp_label)
 	stats_vbox.add_child(mp_row)
@@ -3836,7 +4043,7 @@ func _create_ui() -> void:
 	_label_date.text = "Month %d  Week %d  Day %d" % [_game_month, _game_week, _game_day]
 	_label_date.size = Vector2(170, 25)
 	_label_date.position = Vector2(5, 5)
-	_label_date.add_theme_color_override("font_color", Color(0.9, 0.8, 0.5))
+	_label_date.add_theme_color_override("font_color", Color(0.95, 0.85, 0.70))
 	_label_date.add_theme_font_size_override("font_size", 11)
 	_label_date.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	date_panel.add_child(_label_date)
@@ -3850,8 +4057,8 @@ func _create_ui() -> void:
 	btn_end_turn.size = Vector2(160, 38)
 	btn_end_turn.position = Vector2(10, 6)
 	var btn_normal: StyleBoxFlat = StyleBoxFlat.new()
-	btn_normal.bg_color = Color(0.55, 0.35, 0.15)
-	btn_normal.border_color = Color(0.85, 0.65, 0.35)
+	btn_normal.bg_color = Color(0.65, 0.20, 0.20)  # Vermilion
+	btn_normal.border_color = Color(0.90, 0.35, 0.35)
 	btn_normal.border_width_left = 2
 	btn_normal.border_width_right = 2
 	btn_normal.border_width_top = 2
@@ -3862,8 +4069,8 @@ func _create_ui() -> void:
 	btn_normal.corner_radius_bottom_right = 4
 	btn_end_turn.add_theme_stylebox_override("normal", btn_normal)
 	var btn_hover: StyleBoxFlat = StyleBoxFlat.new()
-	btn_hover.bg_color = Color(0.7, 0.5, 0.28)
-	btn_hover.border_color = Color(0.95, 0.75, 0.45)
+	btn_hover.bg_color = Color(0.80, 0.30, 0.30)
+	btn_hover.border_color = Color(0.95, 0.45, 0.45)
 	btn_hover.border_width_left = 2
 	btn_hover.border_width_right = 2
 	btn_hover.border_width_top = 2
@@ -3878,14 +4085,14 @@ func _create_ui() -> void:
 	btn_end_turn.pressed.connect(_on_end_turn_pressed)
 	btn_panel.add_child(btn_end_turn)
 
-	# === BARRE DU BAS (1060 x 45) — ressources style HoMM3 ===
+	# === BARRE DU BAS (1060 x 45) — ressources style japonais ===
 	var bottom_panel: Panel = Panel.new()
 	bottom_panel.name = "BottomPanel"
 	bottom_panel.size = Vector2(1060, 45)
 	bottom_panel.position = Vector2(0, 675)
 	var bottom_style: StyleBoxFlat = StyleBoxFlat.new()
-	bottom_style.bg_color = Color(0.10, 0.07, 0.03)
-	bottom_style.border_color = Color(0.72, 0.52, 0.25)
+	bottom_style.bg_color = Color(0.12, 0.08, 0.06)  # Fond sombre
+	bottom_style.border_color = Color(0.85, 0.25, 0.25)  # Vermilion
 	bottom_style.border_width_top = 3
 	bottom_style.border_width_bottom = 3
 	bottom_style.border_width_left = 3
@@ -3900,16 +4107,16 @@ func _create_ui() -> void:
 	res_hbox.add_theme_constant_override("separation", 60)
 	bottom_panel.add_child(res_hbox)
 
-	# --- Status Window (centre, style HoMM3) ---
+	# --- Status Window (centre, style japonais) ---
 	var status_label: Label = Label.new()
-	status_label.text = "Status Window"
-	status_label.add_theme_color_override("font_color", Color(0.9, 0.8, 0.5))
+	status_label.text = "Statut"
+	status_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.70))
 	status_label.add_theme_font_size_override("font_size", 13)
 	res_hbox.add_child(status_label)
 
-	# --- Or ---
+	# --- Or (Koban) ---
 	var gold_icon_label: Label = Label.new()
-	gold_icon_label.text = "G"
+	gold_icon_label.text = "K"
 	gold_icon_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	gold_icon_label.add_theme_font_size_override("font_size", 16)
 	res_hbox.add_child(gold_icon_label)
@@ -3919,10 +4126,10 @@ func _create_ui() -> void:
 	_label_gold.add_theme_font_size_override("font_size", 16)
 	res_hbox.add_child(_label_gold)
 
-	# --- Bois ---
+	# --- Bois (Take) ---
 	var wood_icon_label: Label = Label.new()
-	wood_icon_label.text = "W"
-	wood_icon_label.add_theme_color_override("font_color", Color(0.6, 0.9, 0.4))
+	wood_icon_label.text = "T"
+	wood_icon_label.add_theme_color_override("font_color", Color(0.55, 0.35, 0.15))
 	wood_icon_label.add_theme_font_size_override("font_size", 16)
 	res_hbox.add_child(wood_icon_label)
 	_label_wood = Label.new()
@@ -3931,10 +4138,10 @@ func _create_ui() -> void:
 	_label_wood.add_theme_font_size_override("font_size", 16)
 	res_hbox.add_child(_label_wood)
 
-	# --- Minerai ---
+	# --- Minerai (Kuromu) ---
 	var ore_icon_label: Label = Label.new()
-	ore_icon_label.text = "M"
-	ore_icon_label.add_theme_color_override("font_color", Color(0.75, 0.75, 0.85))
+	ore_icon_label.text = "K"
+	ore_icon_label.add_theme_color_override("font_color", Color(0.55, 0.55, 0.65))
 	ore_icon_label.add_theme_font_size_override("font_size", 16)
 	res_hbox.add_child(ore_icon_label)
 	_label_ore = Label.new()
@@ -3997,10 +4204,10 @@ func _create_decorated_panel(size: Vector2) -> Panel:
 	var panel: Panel = Panel.new()
 	panel.size = size
 	
-	# Style avec fond marron et bordure dorée
+	# Style avec fond sombre et bordure vermilion
 	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = Color(0.20, 0.14, 0.08)  # Marron moyen
-	style.border_color = Color(0.72, 0.52, 0.25)  # Doré HoMM3
+	style.bg_color = Color(0.15, 0.10, 0.08)  # Fond sombre
+	style.border_color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	style.border_width_left = 2
 	style.border_width_right = 2
 	style.border_width_top = 2
@@ -4072,6 +4279,8 @@ const RESOURCE_TYPES: Array = ["gold", "wood", "ore", "gold", "wood", "ore", "go
 
 # Décorations sur la carte (arbres, rochers, tours)
 var _decorations: Array = []
+var _petals: Array = []  # Particules de pétales de cerisier
+var _japanese_buildings: Array = []  # Sprites de bâtiments japonais
 const TREE_COUNT: int = 40
 const ROCK_COUNT: int = 25
 const TOWER_COUNT: int = 15
@@ -4090,7 +4299,7 @@ var _smoke_particles: Array = []
 var _terrain_grid: Array = []
 
 # ============================================================
-# SYSTÈME HOMM : POINTS DE MOUVEMENT
+# SYSTÈME HOMURA : POINTS DE MOUVEMENT
 # ============================================================
 var _hero_mp: int = 0          # Points de mouvement actuels
 var _hero_max_mp: int = 20     # Points de mouvement max par jour
@@ -4106,14 +4315,14 @@ var _turn_in_progress: bool = false
 var _current_path: Array = []  # Chemin de tuiles calculé
 
 # ============================================================
-# SYSTÈME HOMM : BROUILLARD DE GUERRE
+# SYSTÈME HOMURA : BROUILLARD DE GUERRE
 # ============================================================
 var _fog_grid: Array = []        # Grille du brouillard: 0=inconnu, 1=découvert, 2=visible
 const FOG_VISION_RANGE: int = 5  # Portée de vision du héros
 var _map_sprite: Sprite2D = null  # Référence au sprite de la carte
 
 # ============================================================
-# SYSTÈME HOMM : ARMÉE DU HÉROS
+# SYSTÈME HOMURA : ARMÉE DU HÉROS
 # ============================================================
 # Unités de type: nom, hp, attack, defense, speed, sprite_type
 const UNIT_TYPES: Dictionary = {
@@ -4133,7 +4342,7 @@ var _hero_army: Array = [
 var _enemy_armies: Array = []
 
 # ============================================================
-# SYSTÈME HOMM : VILLES ET CONSTRUCTION
+# SYSTÈME HOMURA : VILLES ET CONSTRUCTION
 # ============================================================
 # Bâtiments de ville: nom, cost_gold, cost_wood, cost_ore, effect
 const CITY_BUILDINGS: Dictionary = {
@@ -4154,7 +4363,7 @@ var _selected_city_index: int = -1
 var _town_screen_open: bool = false
 
 # ============================================================
-# SYSTÈME HOMM : FIN DE TOUR
+# SYSTÈME HOMURA : FIN DE TOUR
 # ============================================================
 var _end_turn_button: Button = null
 var _label_mp: Label = null  # Label pour afficher les MP
@@ -4163,6 +4372,9 @@ func _create_cities() -> void:
 	# Créer des villes à des positions aléatoires sur la carte
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.randomize()
+	
+	# Charger le sprite sheet de bâtiments japonais
+	var japanese_sheet: Texture2D = load("res://assets/bat.png")
 	
 	for i in range(CITY_COUNT):
 		var city_x: int = rng.randi_range(2, _zone_w - 3)
@@ -4174,6 +4386,14 @@ func _create_cities() -> void:
 		# Stocker la position de la ville
 		_cities.append(city_pos)
 		
+		# Initialiser les données de la ville
+		_cities_data.append({
+			"position": city_pos,
+			"buildings": [],
+			"garrison": [],
+			"income": 500
+		})
+		
 		# Créer le visuel du château (2x2 tuiles = 128x128)
 		var city_node: Node2D = Node2D.new()
 		city_node.name = "City_" + str(i)
@@ -4181,39 +4401,66 @@ func _create_cities() -> void:
 		add_child(city_node)
 		
 		# === CHÂTEAU PRINCIPAL vs CASERNES ===
-		# Ville 0 = Château principal (castle.png), plus grand et majestueux
-		# Villes 1+ = Casernes (barracks.png), bâtiments militaires plus petits
+		# Ville 0 = Château principal (bâtiment japonais), plus grand et majestueux
+		# Villes 1+ = Casernes (bâtiments japonais), bâtiments militaires plus petits
 		var castle_sprite: Sprite2D = Sprite2D.new()
 		var is_main_castle: bool = (i == 0)
 		
-		if is_main_castle:
-			# === CHÂTEAU PRINCIPAL ===
-			var castle_texture: Texture2D = load("res://assets/external/castle.png")
-			if castle_texture != null:
-				castle_sprite.texture = castle_texture
-				# Château plus grand et plus imposant (cible ~256px)
-				var target_size: float = 256.0
-				var tex_size: Vector2 = castle_texture.get_size()
-				var scale_factor: float = target_size / max(tex_size.x, tex_size.y)
-				castle_sprite.scale = Vector2(scale_factor, scale_factor)
+		if japanese_sheet != null:
+			var sheet_size: Vector2 = japanese_sheet.get_size()
+			var cols: int = 4
+			var rows: int = 3
+			var building_width: float = sheet_size.x / cols
+			var building_height: float = sheet_size.y / rows
+			var margin_x: float = building_width * 0.05
+			var margin_y: float = building_height * 0.05
+			
+			var building_index: int = 0 if is_main_castle else rng.randi_range(1, 11)
+			var col: int = building_index % cols
+			var row: int = building_index / cols
+			
+			var atlas: AtlasTexture = AtlasTexture.new()
+			atlas.atlas = japanese_sheet
+			atlas.region = Rect2(col * building_width + margin_x, row * building_height + margin_y, building_width - margin_x * 2, building_height - margin_y * 2)
+			
+			castle_sprite.texture = atlas
+			
+			if is_main_castle:
+				castle_sprite.scale = Vector2(2.0, 2.0)
+				castle_sprite.position = Vector2(0, -90)
 			else:
-				# Fallback procédural plus grand
-				castle_sprite.texture = _generate_sprite("castle", 256, i * 1337)
-			castle_sprite.position = Vector2(0, -90)
+				castle_sprite.scale = Vector2(1.5, 1.5)
+				castle_sprite.position = Vector2(0, -64)
 		else:
-			# === CASERNES (barracks.png) ===
-			var barracks_texture: Texture2D = load("res://assets/external/barracks.png")
-			if barracks_texture != null:
-				castle_sprite.texture = barracks_texture
-				# Casernes plus modestes (cible ~192px)
-				var target_size: float = 192.0
-				var tex_size: Vector2 = barracks_texture.get_size()
-				var scale_factor: float = target_size / max(tex_size.x, tex_size.y)
-				castle_sprite.scale = Vector2(scale_factor, scale_factor)
+			# Fallback aux textures originales
+			if is_main_castle:
+				# === CHÂTEAU PRINCIPAL ===
+				var castle_texture: Texture2D = load("res://assets/external/castle.png")
+				if castle_texture != null:
+					castle_sprite.texture = castle_texture
+					# Château plus grand et plus imposant (cible ~256px)
+					var target_size: float = 256.0
+					var tex_size: Vector2 = castle_texture.get_size()
+					var scale_factor: float = target_size / max(tex_size.x, tex_size.y)
+					castle_sprite.scale = Vector2(scale_factor, scale_factor)
+				else:
+					# Fallback procédural plus grand
+					castle_sprite.texture = _generate_sprite("castle", 256, i * 1337)
+				castle_sprite.position = Vector2(0, -90)
 			else:
-				# Fallback procédural standard
-				castle_sprite.texture = _generate_sprite("castle", 192, i * 1337)
-			castle_sprite.position = Vector2(0, -64)
+				# === CASERNES (barracks.png) ===
+				var barracks_texture: Texture2D = load("res://assets/external/barracks.png")
+				if barracks_texture != null:
+					castle_sprite.texture = barracks_texture
+					# Casernes plus modestes (cible ~192px)
+					var target_size: float = 192.0
+					var tex_size: Vector2 = barracks_texture.get_size()
+					var scale_factor: float = target_size / max(tex_size.x, tex_size.y)
+					castle_sprite.scale = Vector2(scale_factor, scale_factor)
+				else:
+					# Fallback procédural standard
+					castle_sprite.texture = _generate_sprite("castle", 192, i * 1337)
+				castle_sprite.position = Vector2(0, -64)
 		city_node.add_child(castle_sprite)
 		
 		# === FUMÉE DES CHEMINÉES ===
@@ -4319,6 +4566,10 @@ func _create_enemies() -> void:
 			"res://assets/units/goblin.png",
 			"res://assets/units/archer.png",
 			"res://assets/units/swordsman.png",
+			"res://assets/units/tengu.png",
+			"res://assets/units/kappa.png",
+			"res://assets/units/ninja.png",
+			"res://assets/units/monk.png",
 		]
 		var sprite_path: String = enemy_sprites[i % enemy_sprites.size()]
 		var texture: Texture2D = load(sprite_path) if ResourceLoader.exists(sprite_path) else null
@@ -4331,7 +4582,7 @@ func _create_enemies() -> void:
 			enemy_node.add_child(sprite)
 		else:
 			# Fallback : sprite procédural selon le type
-			var enemy_types: Array = ["enemy_skeleton", "enemy_goblin", "enemy_archer", "enemy_swordsman"]
+			var enemy_types: Array = ["enemy_skeleton", "enemy_goblin", "enemy_archer", "enemy_swordsman", "enemy_tengu", "enemy_kappa", "enemy_ninja", "enemy_monk"]
 			var sprite_type: String = enemy_types[i % enemy_types.size()]
 			var enemy_sprite: Sprite2D = Sprite2D.new()
 			enemy_sprite.texture = _generate_sprite(sprite_type, 64, i * 7919)
