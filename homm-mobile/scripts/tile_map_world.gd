@@ -32,6 +32,7 @@ var _hero: Node2D = null
 var _camera: Camera2D = null
 var _movement_indicator: Node2D = null  # Indicateur de portée de déplacement
 var _floating_texts: Array = []  # Textes flottants (effets visuels)
+const MAX_FLOATING_TEXTS: int = 6
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()  # Générateur de nombres aléatoires global
 
 # Références UI
@@ -1519,6 +1520,7 @@ func _ready() -> void:
 	_combat_manager.combat_victory.connect(_on_combat_victory)
 	_combat_manager.combat_defeat.connect(_on_combat_defeat)
 	_combat_manager.combat_fled.connect(_on_combat_fled)
+	_combat_manager.combat_ended.connect(_on_combat_ended)
 	add_child(_combat_manager)
 	print("✓ Combat Manager initialisé")
 	
@@ -1555,6 +1557,7 @@ func _create_map() -> void:
 	_map_sprite.position = Vector2(60 * TILE_SIZE / 2, 40 * TILE_SIZE / 2)  # Centré sur la map
 	_map_sprite.set_z_index(-10)
 	add_child(_map_sprite)
+	_create_fog_overlay()
 	print("=== TERRAIN SPRITE CRÉÉ: 60×40 tuiles ===")
 
 	print("Carte générée : 60×40 = 2400 tuiles")
@@ -2483,11 +2486,11 @@ func _create_japanese_decorations() -> void:
 	var japanese_sheet: Texture2D = load("res://assets/bat.png")
 	
 	# Nombre d'éléments japonais
-	const TORII_COUNT: int = 5
-	const SAKURA_COUNT: int = 15
-	const LANTERN_COUNT: int = 20
-	const SHRINE_COUNT: int = 3
-	const BUILDING_COUNT: int = 12  # Bâtiments depuis le sprite sheet
+	const TORII_COUNT: int = 3
+	const SAKURA_COUNT: int = 8
+	const LANTERN_COUNT: int = 10
+	const SHRINE_COUNT: int = 2
+	const BUILDING_COUNT: int = 6
 	
 		# === BÂTIMENTS JAPONAIS DU SPRITE SHEET ===
 	if japanese_sheet != null:
@@ -3056,7 +3059,8 @@ func _create_hero_sprites() -> void:
 	_camera = Camera2D.new()
 	_camera.position = Vector2(cam_x, cam_y)
 	_camera.enabled = true
-	add_child(_camera)  # IMPORTANT: Ajouter la caméra à la scène !
+	_camera.position_smoothing_enabled = false
+	add_child(_camera)
 	
 	# Calculer le zoom exact pour que la zone 60×40 (toute la map) remplisse l'écran 1280×720
 	var zone_width_pixels: float = _zone_w * TILE_SIZE   # 60 * 64 = 3840
@@ -3065,16 +3069,12 @@ func _create_hero_sprites() -> void:
 	var screen_width: float = 1280.0
 	var screen_height: float = 720.0
 	
-	var zoom_x: float = screen_width / zone_width_pixels   # 1280 / 3840 = 0.333
-	var zoom_y: float = screen_height / zone_height_pixels  # 720 / 2560 = 0.281
-	var optimal_zoom: float = min(zoom_x, zoom_y)         # 0.28
-	
-	_camera.zoom = Vector2(optimal_zoom, optimal_zoom)
+	_setup_camera_zoom()
 	
 	print("Caméra centrée sur la zone colorée: ", _camera.position)
 	print("Zone: ", _zone_w, "×", _zone_h, " tuiles (", zone_width_pixels, "×", zone_height_pixels, " pixels)")
-	print("Écran: ", screen_width, "×", screen_height, " pixels")
-	print("Zoom optimal appliqué: ", optimal_zoom)
+	print("Zoom min: ", _camera_zoom_min, " | défaut: ", _camera_zoom_default)
+	_clamp_camera_to_map()
 	
 	print("Héros créé avec visuel à la position : ", _hero.position)
 	print("Caméra créée pour suivre le héros")
@@ -3135,6 +3135,8 @@ func _create_movement_indicator() -> void:
 	print("✓ Indicateur de portée créé (", move_range, " tuiles)")
 
 func _input(event: InputEvent) -> void:
+	if _in_combat or _town_screen_open or _game_over_active:
+		return
 	# Déplacer le héros avec les clics de souris (système HoMM3 avec MP)
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if _hero_mp <= 0:
@@ -3195,6 +3197,8 @@ func _input(event: InputEvent) -> void:
 		_check_city_visit()
 		_check_enemy_encounter()
 		_check_resource_collection()
+		_check_treasure_collection()
+		_clamp_camera_to_map()
 		
 		# Mettre à jour l'affichage des MP
 		if _label_mp != null:
@@ -3204,15 +3208,15 @@ func _input(event: InputEvent) -> void:
 	if _camera != null and event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			var new_zoom: float = _camera.zoom.x + ZOOM_STEP
-			new_zoom = clamp(new_zoom, ZOOM_MIN, ZOOM_MAX)
+			new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
 			_camera.zoom = Vector2(new_zoom, new_zoom)
-			print("🔍 Zoom IN: ", new_zoom)
+			_clamp_camera_to_map()
 		
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var new_zoom: float = _camera.zoom.x - ZOOM_STEP
-			new_zoom = clamp(new_zoom, ZOOM_MIN, ZOOM_MAX)
+			new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
 			_camera.zoom = Vector2(new_zoom, new_zoom)
-			print("🔍 Zoom OUT: ", new_zoom)
+			_clamp_camera_to_map()
 	
 	# Raccourcis clavier HoMM3
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -3246,7 +3250,7 @@ func _input(event: InputEvent) -> void:
 			KEY_Q:
 				# Quitter l'écran de ville
 				if _town_screen_open:
-					_town_screen_open = false
+					_close_town_screen()
 					_selected_city_index = -1
 					print("=== FERMÉ ===")
 			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0:
@@ -3258,61 +3262,32 @@ func _input(event: InputEvent) -> void:
 					print("Sélection: ", num)
 
 func _process(delta: float) -> void:
-	var time: float = Time.get_time_dict_from_system()["second"]
-	var pulse: float = (sin(Time.get_time_dict_from_system()["second"] * 3.0) + 1.0) / 2.0
-	
-	# Animation du halo du héros (pulsation douce)
+	if _game_over_active:
+		return
+	_anim_time += delta
+	_fx_frame += 1
+	# Halo héros seulement (léger)
 	if _hero != null:
 		var hero_glow: Sprite2D = _hero.get_node_or_null("HeroGlow")
 		if hero_glow != null:
-			hero_glow.modulate.a = 0.6 + pulse * 0.4
-			hero_glow.scale = Vector2(1.0 + pulse * 0.1, 1.0 + pulse * 0.1)
-	
-	# Animation du glow des coffres (scintillement doré)
+			var pulse: float = (sin(_anim_time * 3.0) + 1.0) * 0.5
+			hero_glow.modulate.a = 0.6 + pulse * 0.35
+	# Coffres / fumée : 1 frame sur 4 (cosmétique)
+	if _fx_frame % 4 != 0:
+		return
+	var t: float = _anim_time
 	for chest_node in _treasure_visuals:
-		if chest_node.visible:
-			var chest_glow: Sprite2D = chest_node.get_node_or_null("ChestGlow")
-			if chest_glow != null:
-				var chest_pulse: float = (sin(time * 4.0 + chest_node.position.x * 0.1) + 1.0) / 2.0
-				chest_glow.modulate.a = 0.5 + chest_pulse * 0.5
-	
-	# Animation de la fumée des châteaux
-	var elapsed: float = Time.get_time_dict_from_system()["second"]
+		if not chest_node.visible:
+			continue
+		var chest_glow: Sprite2D = chest_node.get_node_or_null("ChestGlow")
+		if chest_glow != null:
+			var chest_pulse: float = (sin(t * 4.0 + chest_node.position.x * 0.1) + 1.0) * 0.5
+			chest_glow.modulate.a = 0.5 + chest_pulse * 0.45
 	for smoke_data in _smoke_particles:
 		var smoke: Sprite2D = smoke_data["sprite"]
-		var s_offset: float = smoke_data["offset"]
-		var s_speed: float = smoke_data["speed"]
-		var cycle: float = fmod(elapsed + s_offset, s_speed) / s_speed
-		# Monter
-		smoke.position.y = smoke_data["base_pos"].y - cycle * 20
-		# Dériver légèrement
-		smoke.position.x = smoke_data["base_pos"].x + sin(cycle * 6.28) * 3
-	
-	# Animation des pétales de cerisier
-	for petal_data in _petals:
-		var petal: ColorRect = petal_data["node"]
-		var speed_y: float = petal_data["speed_y"]
-		var speed_x: float = petal_data["speed_x"]
-		var rotation: float = petal_data["rotation"]
-		var rotation_speed: float = petal_data["rotation_speed"]
-		
-		# Déplacer le pétale
-		petal.position.y += speed_y * delta * 60
-		petal.position.x += speed_x * delta * 60 + sin(petal.position.y * 0.02) * 0.5
-		
-		# Rotation
-		petal.rotation += rotation_speed * delta * 60
-		
-		# Reset si hors écran
-		if petal.position.y > _world_h * TILE_SIZE:
-			petal.position.y = -10
-			petal.position.x = rng.randf_range(0, _world_w * TILE_SIZE)
-		if petal.position.x < -10 or petal.position.x > _world_w * TILE_SIZE + 10:
-			petal.position.x = rng.randf_range(0, _world_w * TILE_SIZE)
-	
-	# Mettre à jour la position de l'indicateur de mouvement pour qu'il suive le héros
-	if _movement_indicator != null and _hero != null:
-		_movement_indicator.position = _hero.position
+		var cycle: float = fmod(t + smoke_data["offset"], smoke_data["speed"]) / smoke_data["speed"]
+		smoke.position.y = smoke_data["base_pos"].y - cycle * 20.0
+		smoke.position.x = smoke_data["base_pos"].x + sin(cycle * TAU) * 3.0
 
 # ============================================================
 # SYSTÈME HOMURA : BROUILLARD DE GUERRE
@@ -3323,31 +3298,117 @@ func _init_fog_of_war() -> void:
 	for x in range(_zone_w):
 		_fog_grid.append([])
 		for y in range(_zone_h):
-			_fog_grid[x].append(0)  # 0 = inconnu (noir)
+			_fog_grid[x].append(0)  # 0 = inconnu
 	print("✓ Brouillard de guerre initialisé: ", _zone_w, "x", _zone_h)
 
+func _create_fog_overlay() -> void:
+	_fog_overlay = Sprite2D.new()
+	_fog_overlay.name = "FogOverlay"
+	_fog_overlay.z_index = 8
+	if _map_sprite:
+		_fog_overlay.position = _map_sprite.position
+	add_child(_fog_overlay)
+	var img_w: int = _zone_w * TILE_SIZE
+	var img_h: int = _zone_h * TILE_SIZE
+	_fog_image = Image.create(img_w, img_h, false, Image.FORMAT_RGBA8)
+	_fog_image.fill(Color(0.04, 0.06, 0.10, 1.0))
+	_fog_texture = ImageTexture.create_from_image(_fog_image)
+	_fog_overlay.texture = _fog_texture
+
+func _paint_fog_tile(tx: int, ty: int) -> void:
+	if _fog_image == null or tx < 0 or ty < 0 or tx >= _zone_w or ty >= _zone_h:
+		return
+	var rect := Rect2i(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+	var state: int = _fog_grid[tx][ty]
+	if state == 2:
+		_fog_image.fill_rect(rect, Color(0, 0, 0, 0))
+	else:
+		var alpha: float = 1.0 if state == 0 else 0.5
+		_fog_image.fill_rect(rect, Color(0.04, 0.06, 0.10, alpha))
+
+func _refresh_fog_tiles(tiles: Array) -> void:
+	if tiles.is_empty() or _fog_image == null or _fog_texture == null:
+		return
+	for tile in tiles:
+		if tile is Vector2i:
+			_paint_fog_tile(tile.x, tile.y)
+	_fog_texture.update(_fog_image)
+
+func _tile_at_world(world_pos: Vector2) -> Vector2i:
+	return Vector2i(
+		clampi(int(world_pos.x / TILE_SIZE), 0, _zone_w - 1),
+		clampi(int(world_pos.y / TILE_SIZE), 0, _zone_h - 1)
+	)
+
+func _is_tile_visible(tx: int, ty: int) -> bool:
+	if tx < 0 or ty < 0 or tx >= _zone_w or ty >= _zone_h:
+		return false
+	return _fog_grid[tx][ty] == 2
+
+func _update_entity_visibility() -> void:
+	for i in range(_enemies.size()):
+		if not _enemies[i].get("alive", true):
+			continue
+		if i >= _enemy_visuals.size():
+			continue
+		var t: Vector2i = _tile_at_world(_enemies[i]["position"])
+		_enemy_visuals[i].visible = _is_tile_visible(t.x, t.y)
+	for i in range(_cities.size()):
+		if i >= _city_visuals.size():
+			continue
+		var t: Vector2i = _tile_at_world(_cities[i])
+		_city_visuals[i].visible = _is_tile_visible(t.x, t.y)
+	for i in range(_resources.size()):
+		if _resources[i].get("collected", false):
+			continue
+		if i >= _resource_visuals.size():
+			continue
+		var t: Vector2i = _tile_at_world(_resources[i]["position"])
+		_resource_visuals[i].visible = _is_tile_visible(t.x, t.y)
+	for i in range(_treasures.size()):
+		if _treasures[i].get("opened", false):
+			continue
+		if i >= _treasure_visuals.size():
+			continue
+		var t: Vector2i = _tile_at_world(_treasures[i]["position"])
+		_treasure_visuals[i].visible = _is_tile_visible(t.x, t.y)
+
 func _update_fog_of_war() -> void:
-	"""Met à jour le brouillard de guerre autour du héros"""
 	if _fog_grid.is_empty() or _hero == null:
 		return
 	
-	var hero_tx: int = int(_hero.position.x / TILE_SIZE)
-	var hero_ty: int = int(_hero.position.y / TILE_SIZE)
+	var hero_tile: Vector2i = _tile_at_world(_hero.position)
+	var newly_discovered: int = 0
+	var changed_tiles: Array = []
+	var scan_r: int = FOG_VISION_RANGE + 1
 	
-	# Marquer toutes les tuiles comme "découvertes" (1) si elles étaient inconnues (0)
-	# et "visibles" (2) dans la portée de vision
-	for x in range(_zone_w):
-		for y in range(_zone_h):
-			var dist: int = abs(x - hero_tx) + abs(y - hero_ty)
+	for dx in range(-scan_r, scan_r + 1):
+		for dy in range(-scan_r, scan_r + 1):
+			if absi(dx) + absi(dy) > scan_r:
+				continue
+			var x: int = hero_tile.x + dx
+			var y: int = hero_tile.y + dy
+			if x < 0 or y < 0 or x >= _zone_w or y >= _zone_h:
+				continue
+			var dist: int = absi(dx) + absi(dy)
+			var old_state: int = _fog_grid[x][y]
 			if dist <= FOG_VISION_RANGE:
-				if _fog_grid[x][y] == 0:
-					_fog_grid[x][y] = 1  # Découvert
-				_fog_grid[x][y] = 2  # Visible
-			elif _fog_grid[x][y] == 2:
-				_fog_grid[x][y] = 1  # Retombe à "découvert" si hors de portée
+				if old_state == 0:
+					_fog_grid[x][y] = 1
+					newly_discovered += 1
+				if _fog_grid[x][y] != 2:
+					_fog_grid[x][y] = 2
+					changed_tiles.append(Vector2i(x, y))
+			elif old_state == 2:
+				_fog_grid[x][y] = 1
+				changed_tiles.append(Vector2i(x, y))
 	
-	# TODO: Masquer les objets dans le brouillard
-	# Pour l'instant, le brouillard est logique (mémorisation du terrain)
+	if newly_discovered > 0:
+		var discover_xp: int = mini(newly_discovered * XP_DISCOVER_TILE, 30)
+		_gain_xp(discover_xp)
+	
+	_refresh_fog_tiles(changed_tiles)
+	_update_entity_visibility()
 
 # ============================================================
 # SYSTÈME HOMURA : ARMÉES ENNEMIES
@@ -3511,26 +3572,75 @@ func _check_resource_collection() -> void:
 					print("   💎 +15 Minerai !")
 					_create_floating_text("+15 💎", Color(0.75, 0.75, 0.85), _hero.position)
 			
-			# Mettre à jour l'interface
-			if _label_gold:
-				_label_gold.text = str(_gold)
-			if _label_wood:
-				_label_wood.text = str(_wood)
-			if _label_ore:
-				_label_ore.text = str(_ore)
-			
-			# Marquer comme collectée
+			_update_resource_labels()
 			res_data["collected"] = true
-			
-			# Cacher le visuel de la ressource
 			if i < _resource_visuals.size():
 				_resource_visuals[i].visible = false
-			
-			# Gain d'expérience
-			print("   ⭐ +", XP_COLLECT_RESOURCE, " XP !")
 			_gain_xp(XP_COLLECT_RESOURCE)
-			
-			break  # Ne collecter qu'une ressource à la fois
+			break
+
+func _check_treasure_collection() -> void:
+	for i in range(_treasures.size()):
+		var chest_data: Dictionary = _treasures[i]
+		if chest_data.get("opened", false):
+			continue
+		if _hero.position.distance_to(chest_data["position"]) >= TILE_SIZE:
+			continue
+		chest_data["opened"] = true
+		var gold_gain: int = chest_data.get("gold_reward", 40)
+		var xp_gain: int = chest_data.get("xp_reward", XP_OPEN_TREASURE)
+		_gold += gold_gain
+		_update_resource_labels()
+		_create_floating_text("+" + str(gold_gain) + " 🪙", Color(1.0, 0.85, 0.2), _hero.position)
+		_gain_xp(xp_gain)
+		if i < _treasure_visuals.size():
+			_treasure_visuals[i].visible = false
+		print("📦 Coffre ouvert ! +", gold_gain, " or, +", xp_gain, " XP")
+		break
+
+func _update_resource_labels() -> void:
+	if _label_gold:
+		_label_gold.text = str(_gold)
+	if _label_wood:
+		_label_wood.text = str(_wood)
+	if _label_ore:
+		_label_ore.text = str(_ore)
+	if _resource_gold_label:
+		_resource_gold_label.text = " %d" % _gold
+	if _resource_wood_label:
+		_resource_wood_label.text = " %d" % _wood
+	if _resource_ore_label:
+		_resource_ore_label.text = " %d" % _ore
+
+func _get_viewport_size() -> Vector2:
+	return get_viewport().get_visible_rect().size
+
+func _setup_camera_zoom() -> void:
+	var vp: Vector2 = _get_viewport_size()
+	var map_w: float = _zone_w * TILE_SIZE
+	var map_h: float = _zone_h * TILE_SIZE
+	# Dézoom max : la carte remplit l'écran (juste avant les bords)
+	_camera_zoom_min = maxf(vp.x / map_w, vp.y / map_h) * 1.008
+	_camera_zoom_default = _camera_zoom_min * ZOOM_DEFAULT_FACTOR
+	_camera.zoom = Vector2(_camera_zoom_default, _camera_zoom_default)
+
+func _clamp_camera_to_map() -> void:
+	if _camera == null:
+		return
+	var zoom: float = _camera.zoom.x
+	var vp: Vector2 = _get_viewport_size()
+	var half_w: float = vp.x / (2.0 * zoom)
+	var half_h: float = vp.y / (2.0 * zoom)
+	var map_w: float = _zone_w * TILE_SIZE
+	var map_h: float = _zone_h * TILE_SIZE
+	if half_w >= map_w * 0.5:
+		_camera.position.x = map_w * 0.5
+	else:
+		_camera.position.x = clampf(_camera.position.x, half_w, map_w - half_w)
+	if half_h >= map_h * 0.5:
+		_camera.position.y = map_h * 0.5
+	else:
+		_camera.position.y = clampf(_camera.position.y, half_h, map_h - half_h)
 
 func _check_enemy_encounter() -> void:
 	# Vérifier si le héros est proche d'un ennemi
@@ -3549,6 +3659,44 @@ func _check_enemy_encounter() -> void:
 			_start_combat(i)
 			break
 
+func _army_to_combat_units(army: Array) -> Array:
+	var units: Array = []
+	for stack in army:
+		var count: int = stack.get("count", 0)
+		if count <= 0:
+			continue
+		var unit_type: String = stack.get("type", "pikeman")
+		var unit_data: Dictionary = UNIT_TYPES.get(unit_type, {})
+		var per_hp: int = unit_data.get("hp", stack.get("hp", 10))
+		var total_hp: int = count * per_hp
+		units.append({
+			"type": unit_type,
+			"name": str(unit_data.get("name", unit_type)) + " x" + str(count),
+			"count": count,
+			"hp": total_hp,
+			"max_hp": total_hp,
+			"attack": unit_data.get("attack", stack.get("attack", 5)),
+			"defense": unit_data.get("defense", stack.get("defense", 5)),
+			"per_hp": per_hp,
+		})
+	return units
+
+func _combat_units_to_army(combat_units: Array) -> Array:
+	var army: Array = []
+	for unit in combat_units:
+		var remaining_hp: int = unit.get("hp", 0)
+		if remaining_hp <= 0:
+			continue
+		var per_hp: int = max(1, unit.get("per_hp", 10))
+		var unit_type: String = unit.get("type", "pikeman")
+		var count: int = ceili(float(remaining_hp) / float(per_hp))
+		army.append({
+			"type": unit_type,
+			"count": count,
+			"hp": per_hp,
+		})
+	return army
+
 func _start_combat(enemy_index: int) -> void:
 	if _in_combat:
 		return
@@ -3556,14 +3704,26 @@ func _start_combat(enemy_index: int) -> void:
 	_in_combat = true
 	_current_enemy_index = enemy_index
 	var enemy_army: Array = _enemy_armies[enemy_index] if enemy_index < _enemy_armies.size() else []
+	var map_enemy: Dictionary = _enemies[enemy_index] if enemy_index < _enemies.size() else {}
 	
-	print("⚔️ COMBAT HOMURA3 !")
-	print("   Votre armée vs Armée ennemie ", enemy_index + 1)
+	if _army_to_combat_units(_hero_army).is_empty():
+		_in_combat = false
+		_create_floating_text("Pas de troupes !", Color(0.9, 0.2, 0.2), _hero.position)
+		return
 	
-	# Lancer le Combat Manager
+	print("⚔️ COMBAT ! vs ", map_enemy.get("name", "ennemi"))
+	
 	if _combat_manager:
-		var hero_data: Dictionary = {"units": _hero_army}
-		var enemy_data: Dictionary = {"units": enemy_army}
+		var hero_data: Dictionary = {
+			"units": _army_to_combat_units(_hero_army),
+			"name": "Votre armee",
+		}
+		var enemy_data: Dictionary = {
+			"units": _army_to_combat_units(enemy_army),
+			"name": map_enemy.get("name", "Armee ennemie"),
+			"gold": map_enemy.get("gold_reward", 75),
+			"xp": map_enemy.get("xp_reward", 50),
+		}
 		_combat_manager.start_combat(hero_data, enemy_data, enemy_index)
 	else:
 		_in_combat = false
@@ -3587,8 +3747,18 @@ func _print_army_status(name: String, army: Array) -> void:
 		if unit["count"] > 0:
 			print("      ", unit["count"], " ", UNIT_TYPES[unit["type"]]["name"])
 
+func _on_combat_ended(won: bool) -> void:
+	if _combat_manager:
+		_hero_army = _combat_units_to_army(_combat_manager.get_hero_units())
+	_in_combat = false
+	if won and _hero_army.is_empty():
+		_trigger_game_over(false, "Victoire sans survivants — campagne terminée.")
+
 func _on_combat_victory(gold_reward: int, xp_reward: int) -> void:
 	print("🎉 VICTOIRE ! +", gold_reward, " Or, +", xp_reward, " XP")
+	
+	if _current_enemy_index < 0 or _current_enemy_index >= _enemies.size():
+		return
 	
 	var enemy_data: Dictionary = _enemies[_current_enemy_index]
 	enemy_data["alive"] = false
@@ -3597,25 +3767,146 @@ func _on_combat_victory(gold_reward: int, xp_reward: int) -> void:
 	_create_floating_text("+" + str(gold_reward) + " 🪙", Color(1.0, 0.85, 0.2), _hero.position - Vector2(0, 40))
 	
 	_gold += gold_reward
-	if _label_gold:
-		_label_gold.text = str(_gold)
+	_update_resource_labels()
 	
-	_gain_xp(xp_reward)
+	var total_xp: int = xp_reward + XP_KILL_ENEMY
+	_gain_xp(total_xp)
 	
 	if _current_enemy_index < _enemy_visuals.size():
 		_enemy_visuals[_current_enemy_index].visible = false
 	
-	_in_combat = false
+	_check_campaign_victory()
 
 func _on_combat_defeat() -> void:
-	print("💀 DÉFAITE ! Votre armée a été anéantie...")
+	print("💀 DÉFAITE !")
+	_hero_army = []
 	_hero_hp = 0
-	_in_combat = false
-	# TODO: Écran de Game Over
+	_update_hero_panel()
+	_trigger_game_over(false, "Votre armée a été vaincue.\nLa campagne est terminée.")
 
 func _on_combat_fled() -> void:
-	print("🏃 Vous avez fui le combat !")
+	print("🏃 Fuite reussie !")
 	_in_combat = false
+
+func _check_campaign_victory() -> void:
+	for enemy_data in _enemies:
+		if enemy_data.get("alive", true):
+			return
+	_trigger_game_over(true, "Vous avez conquis la région !")
+
+func _on_surrender_pressed() -> void:
+	_trigger_game_over(false, "Vous avez abandonné la campagne.")
+
+func _trigger_game_over(victory: bool, message: String) -> void:
+	if _game_over_active:
+		return
+	_game_over_active = true
+	set_process(false)
+	_in_combat = false
+	_town_screen_open = false
+	if _town_overlay:
+		_town_overlay.visible = false
+	if _combat_manager:
+		_combat_manager.visible = false
+	_show_game_overlay(victory, message)
+
+func _show_game_overlay(victory: bool, message: String) -> void:
+	if _game_over_layer == null:
+		_game_over_layer = CanvasLayer.new()
+		_game_over_layer.name = "GameOverLayer"
+		_game_over_layer.layer = 100
+		add_child(_game_over_layer)
+	else:
+		for child in _game_over_layer.get_children():
+			child.queue_free()
+	
+	var root := Control.new()
+	root.name = "GameOverRoot"
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.anchor_right = 1.0
+	root.anchor_bottom = 1.0
+	root.offset_left = 0.0
+	root.offset_top = 0.0
+	root.offset_right = 0.0
+	root.offset_bottom = 0.0
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	_game_over_layer.add_child(root)
+	_game_overlay = root
+	
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.anchor_right = 1.0
+	dim.anchor_bottom = 1.0
+	dim.offset_left = 0.0
+	dim.offset_top = 0.0
+	dim.offset_right = 0.0
+	dim.offset_bottom = 0.0
+	dim.color = Color(0.02, 0.03, 0.08, 0.92)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	root.add_child(dim)
+	
+	var panel := Panel.new()
+	panel.custom_minimum_size = Vector2(520, 260)
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.anchor_left = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -260.0
+	panel.offset_top = -130.0
+	panel.offset_right = 260.0
+	panel.offset_bottom = 130.0
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.08, 0.06, 0.05, 0.95)
+	panel_style.border_color = Color(0.85, 0.25, 0.25)
+	panel_style.border_width_left = 3
+	panel_style.border_width_right = 3
+	panel_style.border_width_top = 3
+	panel_style.border_width_bottom = 3
+	panel_style.corner_radius_top_left = 10
+	panel_style.corner_radius_top_right = 10
+	panel_style.corner_radius_bottom_left = 10
+	panel_style.corner_radius_bottom_right = 10
+	panel.add_theme_stylebox_override("panel", panel_style)
+	root.add_child(panel)
+	
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.anchor_right = 1.0
+	box.anchor_bottom = 1.0
+	box.offset_left = 24.0
+	box.offset_top = 20.0
+	box.offset_right = -24.0
+	box.offset_bottom = -20.0
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 18)
+	panel.add_child(box)
+	
+	var title := Label.new()
+	title.text = "VICTOIRE !" if victory else "GAME OVER"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_color_override("font_color", Color(0.95, 0.85, 0.2) if victory else Color(0.92, 0.28, 0.22))
+	box.add_child(title)
+	
+	var desc := Label.new()
+	desc.text = message
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.custom_minimum_size = Vector2(440, 0)
+	desc.add_theme_font_size_override("font_size", 16)
+	desc.add_theme_color_override("font_color", Color(0.9, 0.85, 0.75))
+	box.add_child(desc)
+	
+	var btn := Button.new()
+	btn.text = "Retour au menu"
+	btn.custom_minimum_size = Vector2(260, 48)
+	btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	btn.add_theme_font_size_override("font_size", 18)
+	btn.pressed.connect(func():
+		get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+	)
+	box.add_child(btn)
 
 func _victory_combat(enemy_index: int, enemy_data: Dictionary) -> void:
 	# OBSOLETE - remplacé par _on_combat_victory
@@ -3626,42 +3917,44 @@ func _combat_round(enemy_index: int) -> void:
 	pass
 
 func _check_city_visit() -> void:
-	# Vérifier si le héros est proche d'une ville
 	for i in range(_cities.size()):
 		var city_pos: Vector2 = _cities[i]
 		var distance: float = _hero.position.distance_to(city_pos)
-		
 		if distance < TILE_SIZE:
-			print("🏛️ Bienvenue à la Ville ", i + 1, " !")
-			_selected_city_index = i
-			_open_town_screen(i)
-			break
+			if i != _last_city_visit_index:
+				_last_city_visit_index = i
+				print("🏛️ Bienvenue à la Ville ", i + 1, " !")
+				_open_town_screen(i)
+			return
+	_last_city_visit_index = -1
 
 func _open_town_screen(city_index: int) -> void:
-	"""Ouvre l'écran de ville HoMM avec construction et recrutement"""
-	if _town_screen_open:
+	if _town_screen_open or _town_overlay == null:
 		return
-	
 	_town_screen_open = true
-	var city_data: Dictionary = _cities_data[city_index]
-	var city_name: String = "Ville " + str(city_index + 1)
-	
-	print("=== ÉCRAN DE VILLE: ", city_name, " ===")
-	print("   Bâtiments construits: ", city_data["buildings"])
-	print("   Or: ", _gold, " | Bois: ", _wood, " | Minerai: ", _ore)
-	print("   Tapez 'c' pour construire, 'r' pour recruter, 'q' pour quitter")
-	
-	# Afficher les options disponibles
-	print("   Bâtiments disponibles:")
-	for b_key in CITY_BUILDINGS:
-		var b_data: Dictionary = CITY_BUILDINGS[b_key]
-		var built: String = " [CONSTRUIT]" if b_key in city_data["buildings"] else ""
-		print("     ", b_data["name"], " - ", b_data["desc"], " (", b_data["cost_g"], "🪙, ", b_data["cost_w"], "🪵, ", b_data["cost_o"], "💎)", built)
-	
-	print("   Unités disponibles:")
-	for u_key in UNIT_TYPES:
-		var u_data: Dictionary = UNIT_TYPES[u_key]
-		print("     ", u_data["name"], " - ", u_data["hp"], "HP, ", u_data["attack"], "ATK, ", u_data["defense"], "DEF (", u_data["cost_g"], "🪙)")
+	_selected_city_index = city_index
+	if _town_title_label:
+		_town_title_label.text = "Ville " + str(city_index + 1)
+	_town_overlay.visible = true
+	if not _visited_cities.get(city_index, false):
+		_visited_cities[city_index] = true
+		_gain_xp(XP_VISIT_CITY)
+		_create_floating_text("Ville decouverte!", Color(0.7, 0.85, 1.0), _hero.position)
+
+func _close_town_screen() -> void:
+	_town_screen_open = false
+	_selected_city_index = -1
+	_last_city_visit_index = -1
+	if _town_overlay:
+		_town_overlay.visible = false
+
+func _on_town_recruit(unit_type: String, count: int) -> void:
+	if _selected_city_index >= 0:
+		_recruit_unit(_selected_city_index, unit_type, count)
+
+func _on_town_build(building_key: String) -> void:
+	if _selected_city_index >= 0:
+		_build_city_building(_selected_city_index, building_key)
 
 func _build_city_building(city_index: int, building_key: String) -> void:
 	"""Construit un bâtiment dans une ville"""
@@ -3756,9 +4049,64 @@ func _recruit_unit(city_index: int, unit_type: String, count: int) -> void:
 	if _label_ore:
 		_label_ore.text = str(_ore)
 
+func _create_town_overlay(parent: CanvasLayer) -> void:
+	_town_overlay = Panel.new()
+	_town_overlay.name = "TownOverlay"
+	_town_overlay.visible = false
+	_town_overlay.set_anchors_preset(Control.PRESET_CENTER)
+	_town_overlay.custom_minimum_size = Vector2(340, 320)
+	_town_overlay.position = Vector2(470, 200)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.10, 0.08, 0.06)
+	style.border_color = Color(0.85, 0.25, 0.25)
+	style.border_width_left = 3
+	style.border_width_right = 3
+	style.border_width_top = 3
+	style.border_width_bottom = 3
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	_town_overlay.add_theme_stylebox_override("panel", style)
+	parent.add_child(_town_overlay)
+	
+	var vbox := VBoxContainer.new()
+	vbox.position = Vector2(16, 12)
+	vbox.custom_minimum_size = Vector2(308, 296)
+	vbox.add_theme_constant_override("separation", 8)
+	_town_overlay.add_child(vbox)
+	
+	_town_title_label = Label.new()
+	_town_title_label.text = "Ville"
+	_town_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_town_title_label.add_theme_font_size_override("font_size", 20)
+	_town_title_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.2))
+	vbox.add_child(_town_title_label)
+	
+	var btn_pikeman := Button.new()
+	btn_pikeman.text = "Recruter 5 Piquiers (300 or)"
+	btn_pikeman.pressed.connect(func(): _on_town_recruit("pikeman", 5))
+	vbox.add_child(btn_pikeman)
+	
+	var btn_archer := Button.new()
+	btn_archer.text = "Recruter 3 Archers (300 or)"
+	btn_archer.pressed.connect(func(): _on_town_recruit("archer", 3))
+	vbox.add_child(btn_archer)
+	
+	var btn_barracks := Button.new()
+	btn_barracks.text = "Construire Caserne"
+	btn_barracks.pressed.connect(func(): _on_town_build("barracks"))
+	vbox.add_child(btn_barracks)
+	
+	var btn_close := Button.new()
+	btn_close.text = "Quitter"
+	btn_close.pressed.connect(_close_town_screen)
+	vbox.add_child(btn_close)
+
 func _create_ui() -> void:
 	var canvas_layer: CanvasLayer = CanvasLayer.new()
 	canvas_layer.name = "UI"
+	_ui_canvas = canvas_layer
 	add_child(canvas_layer)
 
 	# === CADRE DÉCORATIF AUTOUR DE LA ZONE DE CARTE ===
@@ -4028,11 +4376,11 @@ func _create_ui() -> void:
 	# --- MP (Mouvement) ---
 	var mp_row = HBoxContainer.new()
 	mp_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	var mp_label = Label.new()
-	mp_label.text = "MP %d / %d" % [_hero_mp, _hero_max_mp]
-	mp_label.add_theme_color_override("font_color", Color(0.35, 0.65, 0.45))  # Matcha green
-	mp_label.add_theme_font_size_override("font_size", 12)
-	mp_row.add_child(mp_label)
+	_label_mp = Label.new()
+	_label_mp.text = "MP %d / %d" % [_hero_mp, _hero_max_mp]
+	_label_mp.add_theme_color_override("font_color", Color(0.35, 0.65, 0.45))
+	_label_mp.add_theme_font_size_override("font_size", 12)
+	mp_row.add_child(_label_mp)
 	stats_vbox.add_child(mp_row)
 
 	# --- DATE DU JEU (sous les stats, dans le side_panel) ---
@@ -4048,16 +4396,51 @@ func _create_ui() -> void:
 	_label_date.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	date_panel.add_child(_label_date)
 
-	# --- BOUTON FIN DE TOUR ---
-	var btn_panel: Panel = _create_decorated_panel(Vector2(180, 50))
-	btn_panel.position = Vector2(20, 620)  # Remonté pour réduire l'espace vide
-	side_panel.add_child(btn_panel)
+	var goal_label := Label.new()
+	goal_label.text = "Objectif: vaincre %d armees" % ENEMY_COUNT
+	goal_label.position = Vector2(20, 415)
+	goal_label.size = Vector2(180, 40)
+	goal_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	goal_label.add_theme_color_override("font_color", Color(0.75, 0.65, 0.45))
+	goal_label.add_theme_font_size_override("font_size", 10)
+	side_panel.add_child(goal_label)
+
+	# --- BOUTONS ABANDONNER + FIN DE TOUR ---
+	var actions_panel: Panel = _create_decorated_panel(Vector2(180, 100))
+	actions_panel.position = Vector2(20, 565)
+	side_panel.add_child(actions_panel)
+	var actions_vbox := VBoxContainer.new()
+	actions_vbox.position = Vector2(10, 8)
+	actions_vbox.custom_minimum_size = Vector2(160, 84)
+	actions_vbox.add_theme_constant_override("separation", 8)
+	actions_panel.add_child(actions_vbox)
+	var btn_surrender: Button = Button.new()
+	btn_surrender.text = "ABANDONNER"
+	btn_surrender.custom_minimum_size = Vector2(160, 34)
+	var surrender_normal: StyleBoxFlat = StyleBoxFlat.new()
+	surrender_normal.bg_color = Color(0.22, 0.14, 0.14)
+	surrender_normal.border_color = Color(0.55, 0.35, 0.35)
+	surrender_normal.border_width_left = 2
+	surrender_normal.border_width_right = 2
+	surrender_normal.border_width_top = 2
+	surrender_normal.border_width_bottom = 2
+	surrender_normal.corner_radius_top_left = 4
+	surrender_normal.corner_radius_top_right = 4
+	surrender_normal.corner_radius_bottom_left = 4
+	surrender_normal.corner_radius_bottom_right = 4
+	btn_surrender.add_theme_stylebox_override("normal", surrender_normal)
+	var surrender_hover: StyleBoxFlat = surrender_normal.duplicate()
+	surrender_hover.bg_color = Color(0.38, 0.18, 0.18)
+	btn_surrender.add_theme_stylebox_override("hover", surrender_hover)
+	btn_surrender.add_theme_color_override("font_color", Color(0.95, 0.75, 0.75))
+	btn_surrender.add_theme_font_size_override("font_size", 11)
+	btn_surrender.pressed.connect(_on_surrender_pressed)
+	actions_vbox.add_child(btn_surrender)
 	var btn_end_turn: Button = Button.new()
 	btn_end_turn.text = "FIN DE TOUR"
-	btn_end_turn.size = Vector2(160, 38)
-	btn_end_turn.position = Vector2(10, 6)
+	btn_end_turn.custom_minimum_size = Vector2(160, 38)
 	var btn_normal: StyleBoxFlat = StyleBoxFlat.new()
-	btn_normal.bg_color = Color(0.65, 0.20, 0.20)  # Vermilion
+	btn_normal.bg_color = Color(0.65, 0.20, 0.20)
 	btn_normal.border_color = Color(0.90, 0.35, 0.35)
 	btn_normal.border_width_left = 2
 	btn_normal.border_width_right = 2
@@ -4068,22 +4451,13 @@ func _create_ui() -> void:
 	btn_normal.corner_radius_bottom_left = 4
 	btn_normal.corner_radius_bottom_right = 4
 	btn_end_turn.add_theme_stylebox_override("normal", btn_normal)
-	var btn_hover: StyleBoxFlat = StyleBoxFlat.new()
+	var btn_hover: StyleBoxFlat = btn_normal.duplicate()
 	btn_hover.bg_color = Color(0.80, 0.30, 0.30)
-	btn_hover.border_color = Color(0.95, 0.45, 0.45)
-	btn_hover.border_width_left = 2
-	btn_hover.border_width_right = 2
-	btn_hover.border_width_top = 2
-	btn_hover.border_width_bottom = 2
-	btn_hover.corner_radius_top_left = 4
-	btn_hover.corner_radius_top_right = 4
-	btn_hover.corner_radius_bottom_left = 4
-	btn_hover.corner_radius_bottom_right = 4
 	btn_end_turn.add_theme_stylebox_override("hover", btn_hover)
 	btn_end_turn.add_theme_color_override("font_color", Color(1.0, 0.95, 0.85))
 	btn_end_turn.add_theme_font_size_override("font_size", 12)
 	btn_end_turn.pressed.connect(_on_end_turn_pressed)
-	btn_panel.add_child(btn_end_turn)
+	actions_vbox.add_child(btn_end_turn)
 
 	# === BARRE DU BAS (1060 x 45) — ressources style japonais ===
 	var bottom_panel: Panel = Panel.new()
@@ -4198,6 +4572,7 @@ func _create_ui() -> void:
 	btn_menu.pressed.connect(_on_menu_pressed)
 	res_hbox.add_child(btn_menu)
 
+	_create_town_overlay(canvas_layer)
 	print("✓ Interface HoMM3 (panneau droit + barre du bas) créée")
 
 func _create_decorated_panel(size: Vector2) -> Panel:
@@ -4229,10 +4604,10 @@ var _minimap_hero_dot: ColorRect = null
 const MINIMAP_SIZE: int = 200
 const MINIMAP_SCALE: float = 10.0  # Échelle pour convertir la position du héros en coordonnées minimap
 
-# Zoom constants
-const ZOOM_MIN: float = 0.15  # Dézoom max (voir la map entière)
-const ZOOM_MAX: float = 2.0   # Zoom max (voir les détails)
-const ZOOM_STEP: float = 0.1  # Pas de zoom par tick de molette
+# Zoom : min = carte pleine écran ; défaut = plus serré (pas de bande verte)
+const ZOOM_MAX: float = 2.0
+const ZOOM_STEP: float = 0.1
+const ZOOM_DEFAULT_FACTOR: float = 1.42
 
 # Villes sur la carte
 var _cities: Array = []
@@ -4243,7 +4618,7 @@ const CITY_SIZE: int = 48
 # Ennemis sur la carte
 var _enemies: Array = []
 var _enemy_visuals: Array = []
-const ENEMY_COUNT: int = 40
+const ENEMY_COUNT: int = 20
 const ENEMY_SIZE: int = 40
 
 # Système de combat
@@ -4254,6 +4629,11 @@ var _hero_defense: int = 5
 var _in_combat: bool = false
 var _combat_manager: CanvasLayer = null
 var _current_enemy_index: int = -1
+var _town_overlay: Panel = null
+var _town_title_label: Label = null
+var _game_overlay: Control = null
+var _ui_canvas: CanvasLayer = null
+var _game_over_active: bool = false
 
 # Système de niveau et expérience
 var _hero_level: int = 1
@@ -4261,8 +4641,9 @@ var _hero_xp: int = 0
 var _hero_xp_to_next: int = 100
 const XP_PER_LEVEL: int = 100
 const XP_KILL_ENEMY: int = 50
-const XP_COLLECT_RESOURCE: int = 20
-const XP_VISIT_CITY: int = 30
+const XP_COLLECT_RESOURCE: int = 25
+const XP_VISIT_CITY: int = 40
+const XP_OPEN_TREASURE: int = 35
 
 # Temps du jeu (HoMM3 style)
 var _game_month: int = 1
@@ -4281,9 +4662,9 @@ const RESOURCE_TYPES: Array = ["gold", "wood", "ore", "gold", "wood", "ore", "go
 var _decorations: Array = []
 var _petals: Array = []  # Particules de pétales de cerisier
 var _japanese_buildings: Array = []  # Sprites de bâtiments japonais
-const TREE_COUNT: int = 40
-const ROCK_COUNT: int = 25
-const TOWER_COUNT: int = 15
+const TREE_COUNT: int = 22
+const ROCK_COUNT: int = 12
+const TOWER_COUNT: int = 8
 const DECORATION_SIZE: int = 32
 
 # Coffres au trésor
@@ -4319,7 +4700,19 @@ var _current_path: Array = []  # Chemin de tuiles calculé
 # ============================================================
 var _fog_grid: Array = []        # Grille du brouillard: 0=inconnu, 1=découvert, 2=visible
 const FOG_VISION_RANGE: int = 5  # Portée de vision du héros
+var _fog_overlay: Sprite2D = null
+var _fog_image: Image = null
+var _fog_texture: ImageTexture = null
 var _map_sprite: Sprite2D = null  # Référence au sprite de la carte
+var _anim_time: float = 0.0
+var _fx_frame: int = 0
+var _minimap_scale: float = 0.0
+const DEBUG_LOG: bool = false
+var _visited_cities: Dictionary = {}
+var _game_over_layer: CanvasLayer = null
+var _camera_zoom_min: float = 0.28
+var _camera_zoom_default: float = 0.4
+const XP_DISCOVER_TILE: int = 3
 
 # ============================================================
 # SYSTÈME HOMURA : ARMÉE DU HÉROS
@@ -4361,6 +4754,7 @@ const CITY_BUILDINGS: Dictionary = {
 var _cities_data: Array = []
 var _selected_city_index: int = -1
 var _town_screen_open: bool = false
+var _last_city_visit_index: int = -1
 
 # ============================================================
 # SYSTÈME HOMURA : FIN DE TOUR
@@ -4389,9 +4783,10 @@ func _create_cities() -> void:
 		# Initialiser les données de la ville
 		_cities_data.append({
 			"position": city_pos,
-			"buildings": [],
+			"buildings": ["barracks", "archery_range"] if i == 0 else [],
 			"garrison": [],
-			"income": 500
+			"income": 500,
+			"owned": i == 0,
 		})
 		
 		# Créer le visuel du château (2x2 tuiles = 128x128)
@@ -4520,16 +4915,6 @@ func _create_cities() -> void:
 			city_node.add_child(banner)
 		
 		_city_visuals.append(city_node)
-		
-		# Initialiser les données de ville pour le système HoMM
-		_cities_data.append({
-			"position": city_pos,
-			"buildings": [],
-			"garrison": [],
-			"income": 500,
-			"owned": i == 0  # Première ville possédée par défaut
-		})
-		
 		print("Ville ", i + 1, " créée à la position : ", city_pos)
 
 func _create_enemies() -> void:
@@ -4550,7 +4935,10 @@ func _create_enemies() -> void:
 			"hp": 50,
 			"max_hp": 50,
 			"attack": 10,
-			"alive": true
+			"alive": true,
+			"name": "Armee #" + str(i + 1),
+			"gold_reward": rng.randi_range(50, 150),
+			"xp_reward": rng.randi_range(30, 80),
 		}
 		_enemies.append(enemy_data)
 		
@@ -4747,29 +5135,23 @@ func _create_minimap(parent: Control) -> void:
 	hero_border.color = Color(1, 1, 1)
 	_minimap_hero_dot.add_child(hero_border)
 
-	print("✓ Minimap créée: ", _cities.size(), " villes, ", _enemies.size(), " ennemis, ", _resources.size(), " ressources, ", _treasures.size(), " coffres")
+	_minimap_scale = scale
+	if DEBUG_LOG:
+		print("✓ Minimap créée")
 
 func _update_minimap() -> void:
-	if _minimap_hero_dot == null:
+	if _minimap_hero_dot == null or _hero == null:
 		return
-
-	var hero_x: float = _hero.position.x
-	var hero_y: float = _hero.position.y
-	
-	# Recalculer le scale comme dans _create_minimap
-	var minimap_width: float = 200.0  # Ajusté pour correspondre à la nouvelle taille
-	var minimap_height: float = minimap_width * float(_zone_h) / float(_zone_w)
-	var scale_x: float = (minimap_width - 6) / float(_zone_w * TILE_SIZE)
-	var scale_y: float = (minimap_height - 6) / float(_zone_h * TILE_SIZE)
-	var scale: float = min(scale_x, scale_y)
-	
-	var minimap_x: float = hero_x * scale - 5
-	var minimap_y: float = hero_y * scale - 5
-	_minimap_hero_dot.position = Vector2(minimap_x, minimap_y)
+	_minimap_hero_dot.position = Vector2(
+		_hero.position.x * _minimap_scale - 5.0,
+		_hero.position.y * _minimap_scale - 5.0
+	)
 
 func _create_floating_text(text: String, color: Color, pos: Vector2) -> void:
-	# Créer un texte flottant qui monte et s'efface (effet visuel de gain)
-	# Note: attaché à la scène principale, pas un CanvasLayer, pour suivre la caméra
+	while _floating_texts.size() >= MAX_FLOATING_TEXTS:
+		var old: Node = _floating_texts.pop_front()
+		if is_instance_valid(old):
+			old.queue_free()
 	var label: Label = Label.new()
 	label.name = "FloatingText"
 	label.text = text
@@ -4781,8 +5163,8 @@ func _create_floating_text(text: String, color: Color, pos: Vector2) -> void:
 	label.position = pos - Vector2(40, 60)  # Décalé au-dessus
 	
 	add_child(label)
+	_floating_texts.append(label)
 	
-	# Animation simple : monter et s'effacer
 	var tween: Tween = create_tween()
 	tween.set_parallel(true)
 	
@@ -4793,18 +5175,17 @@ func _create_floating_text(text: String, color: Color, pos: Vector2) -> void:
 	
 	# Supprimer après l'animation
 	tween.chain().tween_callback(func():
-		label.queue_free()
+		_floating_texts.erase(label)
+		if is_instance_valid(label):
+			label.queue_free()
 	)
 
 func _gain_xp(amount: int) -> void:
+	if amount <= 0:
+		return
 	_hero_xp += amount
-	print("   XP total : ", _hero_xp, "/", _hero_xp_to_next)
 	_update_hero_panel()
-	
-	# Texte flottant XP
-	_create_floating_text("+" + str(amount) + " XP", Color(0.9, 0.7, 0.3), _hero.position)
-	
-	# Vérifier si le héros monte de niveau
+	_create_floating_text("+" + str(amount) + " XP", Color(0.9, 0.7, 0.3), _hero.position - Vector2(0, 20))
 	while _hero_xp >= _hero_xp_to_next:
 		_level_up()
 
@@ -4926,16 +5307,16 @@ func _update_hero_panel() -> void:
 	if _label_level != null:
 		_label_level.text = "Niveau %d" % _hero_level
 	
-	if _xp_bar_fill != null:
-		var xp_ratio = float(_hero_xp) / _hero_xp_to_next if _hero_xp_to_next > 0 else 0
-		_xp_bar_fill.size = Vector2(162 * xp_ratio, 14)
+	if _xp_bar_fill != null and _hero_xp_to_next > 0:
+		var xp_ratio: float = clampf(float(_hero_xp) / float(_hero_xp_to_next), 0.0, 1.0)
+		_xp_bar_fill.size = Vector2(104 * xp_ratio, 14)
 	
 	if _label_xp != null:
 		_label_xp.text = "%d / %d XP" % [_hero_xp, _hero_xp_to_next]
 	
-	if _hp_bar_fill != null:
-		var hp_ratio = float(_hero_hp) / _hero_max_hp if _hero_max_hp > 0 else 0
-		_hp_bar_fill.size = Vector2(162 * hp_ratio, 14)
+	if _hp_bar_fill != null and _hero_max_hp > 0:
+		var hp_ratio: float = clampf(float(_hero_hp) / float(_hero_max_hp), 0.0, 1.0)
+		_hp_bar_fill.size = Vector2(104 * hp_ratio, 14)
 		if hp_ratio > 0.5:
 			_hp_bar_fill.color = Color(0.2, 0.7, 0.25)
 		elif hp_ratio > 0.25:
@@ -4952,10 +5333,6 @@ func _update_hero_panel() -> void:
 		_resource_wood_label.text = " %d" % _wood
 	if _resource_ore_label != null:
 		_resource_ore_label.text = " %d" % _ore
-	print("   ❤️ HP max : +20 (", _hero_max_hp, ")")
-	print("   ⚔️ ATK : +5 (", _hero_attack, ")")
-	print("   💚 Héros complètement soigné !")
-	print("   Prochain niveau : ", _hero_xp_to_next, " XP")
 
 func _update_date_label() -> void:
 	if _label_date != null:

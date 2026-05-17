@@ -44,6 +44,7 @@ var _hero_attack_buff: bool = false  # Bonus d'attaque actif
 var _hero_data: Dictionary = {}
 var _enemy_data: Dictionary = {}
 var _enemy_index: int = -1
+var _combat_outcome: String = ""  # victory, defeat, flee
 
 # Styles enrichis
 var _top_bar_style: StyleBoxFlat
@@ -470,6 +471,7 @@ func start_combat(hero_data: Dictionary, enemy_data: Dictionary, enemy_index: in
 	_current_turn = 0
 	_round_count = 1
 	_in_combat = true
+	_combat_outcome = ""
 	_selected_target = -1
 	_hero_defending = false  # Reset defense bonus
 	_hero_attack_buff = false  # Reset attack bonus
@@ -482,6 +484,8 @@ func start_combat(hero_data: Dictionary, enemy_data: Dictionary, enemy_index: in
 	_action_bar.visible = true
 	_defense_indicator.visible = false
 	_rage_indicator.visible = false
+	if _result_button:
+		_result_button.text = "Continuer"
 
 	_update_unit_displays()
 	_log_message("[color=#6ec3e0]Le combat commence![/color]")
@@ -496,9 +500,21 @@ func start_combat(hero_data: Dictionary, enemy_data: Dictionary, enemy_index: in
 	tween.tween_property(_combat_panel, "modulate:a", 1.0, 0.4)
 	tween.parallel().tween_property(_combat_panel, "scale", Vector2(1.0, 1.0), 0.4)
 
+func get_hero_units() -> Array:
+	return _hero_units.duplicate(true)
+
 func _end_combat(won: bool) -> void:
 	_in_combat = false
+	_combat_outcome = "victory" if won else "defeat"
 	_action_bar.visible = false
+
+	if not won:
+		visible = false
+		_combat_panel.visible = false
+		_result_panel.visible = false
+		combat_defeat.emit()
+		combat_ended.emit(false)
+		return
 
 	var tween = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
 	tween.tween_property(_combat_panel, "modulate:a", 0.0, 0.5)
@@ -507,31 +523,46 @@ func _end_combat(won: bool) -> void:
 		_result_panel.visible = true
 		_result_panel.modulate.a = 0.0
 		_result_panel.scale = Vector2(0.8, 0.8)
-
-		if won:
-			_result_title.text = "VICTOIRE!"
-			_result_title.add_theme_color_override("font_color", COLOR_GREEN)
-			_result_desc.text = "[center]Vous avez vaincu " + _enemy_data.get("name", "l'ennemi") + "![/center]\n\n"
-			_result_desc.text += "[color=#d4a017]Experience gagnee:[/color] " + str(_enemy_data.get("xp", 100)) + "\n"
-			_result_desc.text += "[color=#d4a017]Or gagne:[/color] " + str(_enemy_data.get("gold", 50))
-		else:
-			_result_title.text = "DEFAITE"
-			_result_title.add_theme_color_override("font_color", COLOR_RED)
-			_result_desc.text = "[center]Vous avez ete vaincu...[/center]\n\n"
-			_result_desc.text += "Vos troupes ont ete repoussees."
-
+		_result_title.text = "VICTOIRE!"
+		_result_title.add_theme_color_override("font_color", COLOR_GREEN)
+		_result_desc.text = "[center]Vous avez vaincu " + _enemy_data.get("name", "l'ennemi") + "![/center]\n\n"
+		var xp_show: int = int(_enemy_data.get("xp", 50)) + 50
+		_result_desc.text += "[color=#d4a017]Experience gagnee:[/color] " + str(xp_show) + "\n"
+		_result_desc.text += "[color=#d4a017]Or gagne:[/color] " + str(_enemy_data.get("gold", 50))
 		var result_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 		result_tween.tween_property(_result_panel, "modulate:a", 1.0, 0.5)
 		result_tween.parallel().tween_property(_result_panel, "scale", Vector2(1.0, 1.0), 0.5)
 	)
 
+func _show_flee_result() -> void:
+	_in_combat = false
+	_combat_outcome = "flee"
+	_action_bar.visible = false
+	_result_panel.visible = true
+	_result_panel.modulate.a = 1.0
+	_result_panel.scale = Vector2(1.0, 1.0)
+	_result_title.text = "FUITE!"
+	_result_title.add_theme_color_override("font_color", Color(0.5, 0.7, 0.9))
+	_result_desc.text = "[center]Vous avez reussi a fuir le combat.[/center]"
+
 func _on_result_button_pressed() -> void:
+	var outcome: String = _combat_outcome
+	_combat_outcome = ""
 	var tween = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
 	tween.tween_property(_combat_panel, "modulate:a", 0.0, 0.4)
 	tween.tween_callback(func():
 		visible = false
 		_combat_panel.visible = false
-		combat_ended.emit(_result_title.text == "VICTOIRE!")
+		_result_panel.visible = false
+		match outcome:
+			"victory":
+				combat_victory.emit(int(_enemy_data.get("gold", 50)), int(_enemy_data.get("xp", 100)))
+				combat_ended.emit(true)
+			"flee":
+				combat_fled.emit()
+				combat_ended.emit(false)
+			_:
+				combat_ended.emit(false)
 	)
 
 func _on_attack_pressed() -> void:
@@ -686,7 +717,7 @@ func _on_flee_pressed() -> void:
 	_log_message("[color=#8a8a8a]Vous tentez de fuir...[/color]")
 	if randf() < 0.5:
 		_log_message("[color=#5a9eb8]Fuite reussie![/color]")
-		_end_combat(false)
+		_show_flee_result()
 	else:
 		_log_message("[color=#c85a5a]Fuite echouee![/color]")
 		_process_next_turn()
