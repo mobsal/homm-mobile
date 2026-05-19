@@ -169,7 +169,9 @@ func _has_save_file() -> bool:
 func _on_new_game_pressed() -> void:
 	# Supprimer la sauvegarde existante
 	if FileAccess.file_exists("user://save_game.json"):
-		DirAccess.remove_absolute("user://save_game.json")
+		var da = DirAccess.open("user://")
+		if da:
+			da.remove("save_game.json")
 	
 	GameData.should_load_save = false
 	

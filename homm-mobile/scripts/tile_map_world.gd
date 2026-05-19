@@ -4109,6 +4109,14 @@ func _create_ui() -> void:
 	_ui_canvas = canvas_layer
 	add_child(canvas_layer)
 
+	# Obtenir la taille du viewport pour un affichage dynamique
+	var vp_size: Vector2 = _get_viewport_size()
+	var screen_w: float = vp_size.x
+	var screen_h: float = vp_size.y
+	var side_panel_width: float = 220.0
+	var frame_thickness: float = 4.0
+	var map_width: float = screen_w - side_panel_width
+
 	# === CADRE DÉCORATIF AUTOUR DE LA ZONE DE CARTE ===
 	var frame_layer: CanvasLayer = CanvasLayer.new()
 	frame_layer.name = "FrameLayer"
@@ -4117,27 +4125,27 @@ func _create_ui() -> void:
 
 	# Bordure haute
 	var top_bar: ColorRect = ColorRect.new()
-	top_bar.size = Vector2(1060, 6)
+	top_bar.size = Vector2(map_width, 6)
 	top_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	frame_layer.add_child(top_bar)
 
 	# Bordure basse (séparation avec barre ressources)
 	var bot_bar: ColorRect = ColorRect.new()
-	bot_bar.size = Vector2(1060, 4)
-	bot_bar.position = Vector2(0, 671)
+	bot_bar.size = Vector2(screen_w, 4)
+	bot_bar.position = Vector2(0, screen_h - 4)
 	bot_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	frame_layer.add_child(bot_bar)
 
 	# Bordure gauche
 	var left_bar: ColorRect = ColorRect.new()
-	left_bar.size = Vector2(4, 675)
+	left_bar.size = Vector2(frame_thickness, screen_h)
 	left_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	frame_layer.add_child(left_bar)
 
 	# Bordure droite (séparation avec panneau latéral)
 	var right_bar: ColorRect = ColorRect.new()
-	right_bar.size = Vector2(4, 675)
-	right_bar.position = Vector2(1056, 0)
+	right_bar.size = Vector2(frame_thickness, screen_h)
+	right_bar.position = Vector2(map_width - frame_thickness, 0)
 	right_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
 	frame_layer.add_child(right_bar)
 
@@ -4145,17 +4153,17 @@ func _create_ui() -> void:
 	for corner in range(4):
 		var c: ColorRect = ColorRect.new()
 		c.size = Vector2(8, 8)
-		var cx: float = 0 if corner % 2 == 0 else 1052
-		var cy: float = 0 if corner < 2 else 667
+		var cx: float = 0 if corner % 2 == 0 else map_width - 8 - frame_thickness
+		var cy: float = 0 if corner < 2 else screen_h - 8
 		c.position = Vector2(cx, cy)
 		c.color = Color(0.95, 0.85, 0.20)  # Or japonais
 		frame_layer.add_child(c)
 
-	# === PANNEAU DROIT (220 x 720) — style japonais médiéval ===
+	# === PANNEAU DROIT — style japonais médiéval ===
 	var side_panel: Panel = Panel.new()
 	side_panel.name = "SidePanel"
-	side_panel.size = Vector2(220, 720)
-	side_panel.position = Vector2(1060, 0)
+	side_panel.size = Vector2(side_panel_width, screen_h)
+	side_panel.position = Vector2(map_width, 0)
 	var side_style: StyleBoxFlat = StyleBoxFlat.new()
 	side_style.bg_color = Color(0.08, 0.06, 0.05)  # Fond très sombre style laque noire
 	side_style.border_color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
@@ -4436,6 +4444,30 @@ func _create_ui() -> void:
 	btn_surrender.add_theme_font_size_override("font_size", 11)
 	btn_surrender.pressed.connect(_on_surrender_pressed)
 	actions_vbox.add_child(btn_surrender)
+
+	# --- Bouton Plein Écran/Fenêtré ---
+	var btn_fullscreen: Button = Button.new()
+	btn_fullscreen.text = "⛶ Plein Écran"
+	btn_fullscreen.custom_minimum_size = Vector2(160, 34)
+	var fullscreen_normal: StyleBoxFlat = StyleBoxFlat.new()
+	fullscreen_normal.bg_color = Color(0.14, 0.22, 0.14)
+	fullscreen_normal.border_color = Color(0.35, 0.55, 0.35)
+	fullscreen_normal.border_width_left = 2
+	fullscreen_normal.border_width_right = 2
+	fullscreen_normal.border_width_top = 2
+	fullscreen_normal.border_width_bottom = 2
+	fullscreen_normal.corner_radius_top_left = 4
+	fullscreen_normal.corner_radius_top_right = 4
+	fullscreen_normal.corner_radius_bottom_left = 4
+	fullscreen_normal.corner_radius_bottom_right = 4
+	btn_fullscreen.add_theme_stylebox_override("normal", fullscreen_normal)
+	var fullscreen_hover: StyleBoxFlat = fullscreen_normal.duplicate()
+	fullscreen_hover.bg_color = Color(0.18, 0.38, 0.18)
+	btn_fullscreen.add_theme_stylebox_override("hover", fullscreen_hover)
+	btn_fullscreen.add_theme_color_override("font_color", Color(0.75, 0.95, 0.75))
+	btn_fullscreen.add_theme_font_size_override("font_size", 11)
+	btn_fullscreen.pressed.connect(_on_fullscreen_toggled)
+	actions_vbox.add_child(btn_fullscreen)
 	var btn_end_turn: Button = Button.new()
 	btn_end_turn.text = "FIN DE TOUR"
 	btn_end_turn.custom_minimum_size = Vector2(160, 38)
@@ -4459,11 +4491,11 @@ func _create_ui() -> void:
 	btn_end_turn.pressed.connect(_on_end_turn_pressed)
 	actions_vbox.add_child(btn_end_turn)
 
-	# === BARRE DU BAS (1060 x 45) — ressources style japonais ===
+	# === BARRE DU BAS — ressources style japonais ===
 	var bottom_panel: Panel = Panel.new()
 	bottom_panel.name = "BottomPanel"
-	bottom_panel.size = Vector2(1060, 45)
-	bottom_panel.position = Vector2(0, 675)
+	bottom_panel.size = Vector2(screen_w, 45)
+	bottom_panel.position = Vector2(0, screen_h - 45)
 	var bottom_style: StyleBoxFlat = StyleBoxFlat.new()
 	bottom_style.bg_color = Color(0.12, 0.08, 0.06)  # Fond sombre
 	bottom_style.border_color = Color(0.85, 0.25, 0.25)  # Vermilion
@@ -4475,7 +4507,7 @@ func _create_ui() -> void:
 
 	# Conteneur ressources horizontal
 	var res_hbox: HBoxContainer = HBoxContainer.new()
-	res_hbox.size = Vector2(1040, 40)
+	res_hbox.size = Vector2(screen_w - 20, 40)
 	res_hbox.position = Vector2(10, 2)
 	res_hbox.alignment = BoxContainer.ALIGNMENT_BEGIN
 	res_hbox.add_theme_constant_override("separation", 60)
@@ -5218,6 +5250,12 @@ func _on_save_game_pressed() -> void:
 
 func _on_menu_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+
+func _on_fullscreen_toggled() -> void:
+	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 
 func _save_game() -> void:
 	var save_data = {

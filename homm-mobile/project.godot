@@ -25,12 +25,16 @@ RetroBGM="*res://scripts/retro_bgm.gd"
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
+window/size/mode=3
+window/size/resizable=false
+window/stretch/mode=2
+window/stretch/aspect=2
 
 [rendering]
 
-environment/defaults/default_clear_color=Color(0.04, 0.06, 0.12, 1)
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
-2d/batching/use_batching=true
+environment/defaults/default_clear_color=Color(0.04, 0.06, 0.12, 1)
 2d/snap/snap_2d_transforms_to_pixel=true
+2d/batching/use_batching=true
