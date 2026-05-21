@@ -8,12 +8,17 @@ var player_name: String = "Héros"
 # -------------------------------------------------
 # STRUCTURES DE JEU
 # -------------------------------------------------
+class Creature:
+	var name: String
+	var amount: int
+
 class Hero:
 	var id: int
 	var name: String
 	var sprite: Texture2D
 	var position: Vector2i       # coordonnées tile (x, y)
 	var owner: int               # id du joueur
+	var creatures: Array = []
 
 class City:
 	var id: int
@@ -22,6 +27,7 @@ class City:
 	var owner: int
 	var resource_type: String
 	var resource_per_day: int
+	var creatures: Array = []
 
 class Building:
 	var id: int
@@ -30,11 +36,6 @@ class Building:
 	var owner: int
 	var resource_type: String = ""
 	var resource_per_day: int = 0
-
-# NEW STRUCTURE FROM SUGGESTED EDIT
-class Creature:
-	var name: String
-	var amount: int
 
 # Collections
 var heroes: Array[Hero] = []

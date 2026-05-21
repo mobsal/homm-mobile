@@ -423,29 +423,35 @@ class HoMM3AdvancedSpriteGenerator:
         """Dessine une ligne"""
         x1, y1 = start
         x2, y2 = end
-        
+
         # Algorithme de ligne de Bresenham
         dx = abs(x2 - x1)
         dy = abs(y2 - y1)
         sx = 1 if x1 < x2 else -1
         sy = 1 if y1 < y2 else -1
-        
+
         x, y = x1, y1
-        error = dx - dy
-        
-        for i in range(dx + dy + 1):
-            if error < 0:
-                error = -error
-            if error < 0:
-                error = -error
-            
-            x += sx * error
-            y += sy * error
-            
-            # Vérification des limites
-            if 0 <= x < self.sprite_size and 0 <= y < self.sprite_size:
-                if (sx < 0 and x < x2) or (sx > 0 and x > x2) or (sy < 0 and y < y2) or (sy > 0 and y > y2):
-                    pixels[x, y] = color
+        err = dx - dy
+
+        while True:
+            # Dessiner le pixel avec la largeur
+            for wx in range(-width//2, width//2 + 1):
+                for wy in range(-width//2, width//2 + 1):
+                    px, py = x + wx, y + wy
+                    if 0 <= px < self.sprite_size and 0 <= py < self.sprite_size:
+                        pixels[px, py] = color
+
+            # Vérifier si on a atteint la fin
+            if x == x2 and y == y2:
+                break
+
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
     
     def _add_animation_frame(self, pixels, center, colors, frame):
         """Ajoute un effet d'animation"""
@@ -538,14 +544,16 @@ class HoMM3AdvancedSpriteGenerator:
                 # Symbole $
                 font = ImageFont.load_default()
                 text = "$"
-                text_size = font.getsize(text)
-                text_x = (32 - text_size[0]) // 2
-                text_y = (32 - text_size[1]) // 2
-                
-                for y in range(text_size[1]):
-                    for x in range(text_size[0]):
-                        if text[y][x] == 1:
-                            pixels[text_x + x, text_y + y] = self.colors['gold']
+                # Use getbbox instead of deprecated getsize
+                bbox = font.getbbox(text)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                text_x = (32 - text_width) // 2
+                text_y = (32 - text_height) // 2
+
+                # Draw text using ImageDraw
+                draw = ImageDraw.Draw(img)
+                draw.text((text_x, text_y), text, fill=self.colors['gold'], font=font)
             
             elif resource == 'wood':
                 # Planche de bois

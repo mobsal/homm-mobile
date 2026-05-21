@@ -35,23 +35,10 @@ var _floating_texts: Array = []  # Textes flottants (effets visuels)
 const MAX_FLOATING_TEXTS: int = 6
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()  # Générateur de nombres aléatoires global
 
-# Références UI
+# Références UI (pointent vers les labels du HUD)
 var _label_gold: Label = null
 var _label_wood: Label = null
 var _label_ore: Label = null
-
-# Panneau héros amélioré
-var _label_hero_name: Label = null
-var _xp_bar_bg: ColorRect = null
-var _xp_bar_fill: ColorRect = null
-var _hp_bar_bg: ColorRect = null
-var _hp_bar_fill: ColorRect = null
-var _label_xp: Label = null
-var _label_hp: Label = null
-var _resource_gold_label: Label = null
-var _resource_wood_label: Label = null
-var _resource_ore_label: Label = null
-var _label_level: Label = null
 
 # Position du héros
 var _hero_tile: Vector2i = Vector2i.ZERO
@@ -1508,6 +1495,9 @@ func _ready() -> void:
 	# Créer l'interface HoMM3 (inclut la minimap)
 	_create_ui()
 	
+	# Enregistrer les entités dans GameData pour la sélection
+	_register_game_data()
+	
 	# === INITIALISATION SYSTÈMES HOMURA ===
 	_hero_mp = _hero_max_mp
 	_init_fog_of_war()
@@ -1527,6 +1517,9 @@ func _ready() -> void:
 	# Charger sauvegarde si demandé
 	if GameData.should_load_save:
 		_load_game()
+	
+	# Créer des créatures neutres sur la carte
+	_spawn_neutral_creatures()
 	
 	print("✓ Carte créée : ", _world_w, "x", _world_h, " tuiles")
 	print("✓ ", CITY_COUNT, " villes créées sur la carte")
@@ -3062,12 +3055,8 @@ func _create_hero_sprites() -> void:
 	_camera.position_smoothing_enabled = false
 	add_child(_camera)
 	
-	# Calculer le zoom exact pour que la zone 60×40 (toute la map) remplisse l'écran 1280×720
-	var zone_width_pixels: float = _zone_w * TILE_SIZE   # 60 * 64 = 3840
-	var zone_height_pixels: float = _zone_h * TILE_SIZE  # 40 * 64 = 2560
-	
-	var screen_width: float = 1280.0
-	var screen_height: float = 720.0
+	var zone_width_pixels: float = _zone_w * TILE_SIZE
+	var zone_height_pixels: float = _zone_h * TILE_SIZE
 	
 	_setup_camera_zoom()
 	
@@ -3200,9 +3189,8 @@ func _input(event: InputEvent) -> void:
 		_check_treasure_collection()
 		_clamp_camera_to_map()
 		
-		# Mettre à jour l'affichage des MP
-		if _label_mp != null:
-			_label_mp.text = str(_hero_mp) + "/" + str(_hero_max_mp)
+		# Mettre à jour l'UI
+		_update_resource_labels()
 	
 	# Zoom avec la molette
 	if _camera != null and event is InputEventMouseButton:
@@ -3445,48 +3433,6 @@ func _init_enemy_armies() -> void:
 # ============================================================
 # SYSTÈME HOMURA : FIN DE TOUR
 # ============================================================
-func _create_end_turn_button() -> void:
-	"""Crée le bouton 'Fin de Tour' dans le panneau latéral"""
-	var canvas_layer: CanvasLayer = get_node_or_null("UI")
-	if canvas_layer == null:
-		return
-	
-	var side_panel: Panel = canvas_layer.get_node_or_null("SidePanel")
-	if side_panel == null:
-		return
-	
-	_end_turn_button = Button.new()
-	_end_turn_button.name = "EndTurnButton"
-	_end_turn_button.text = "FIN DE TOUR"
-	_end_turn_button.size = Vector2(180, 40)
-	_end_turn_button.position = Vector2(20, 580)
-	
-	# Style HoMM3
-	var button_style: StyleBoxFlat = StyleBoxFlat.new()
-	button_style.bg_color = Color(0.25, 0.15, 0.05)
-	button_style.border_color = Color(0.72, 0.52, 0.25)
-	button_style.border_width_left = 3
-	button_style.border_width_right = 3
-	button_style.border_width_top = 3
-	button_style.border_width_bottom = 3
-	_end_turn_button.add_theme_stylebox_override("normal", button_style)
-	_end_turn_button.add_theme_color_override("font_color", Color(0.9, 0.8, 0.5))
-	_end_turn_button.add_theme_font_size_override("font_size", 16)
-	
-	_end_turn_button.pressed.connect(_end_turn)
-	side_panel.add_child(_end_turn_button)
-	
-	# Label MP
-	_label_mp = Label.new()
-	_label_mp.name = "MPLabel"
-	_label_mp.text = str(_hero_mp) + "/" + str(_hero_max_mp)
-	_label_mp.position = Vector2(20, 545)
-	_label_mp.add_theme_color_override("font_color", Color(0.2, 0.9, 0.4))
-	_label_mp.add_theme_font_size_override("font_size", 18)
-	side_panel.add_child(_label_mp)
-	
-	print("✓ Bouton 'Fin de Tour' et MP créés")
-
 func _end_turn() -> void:
 	"""Gère la fin de tour (HoMM style)"""
 	print("=== FIN DE TOUR ===")
@@ -3526,14 +3472,7 @@ func _end_turn() -> void:
 	# 4. Mettre à jour l'interface
 	if _label_date:
 		_label_date.text = "Month %d  Week %d  Day %d" % [_game_month, _game_week, _game_day]
-	if _label_mp != null:
-		_label_mp.text = str(_hero_mp) + "/" + str(_hero_max_mp)
-	if _label_gold:
-		_label_gold.text = str(_gold)
-	if _label_wood:
-		_label_wood.text = str(_wood)
-	if _label_ore:
-		_label_ore.text = str(_ore)
+	_update_resource_labels()
 	
 	print("Date : Month ", _game_month, ", Week ", _game_week, ", Day ", _game_day)
 	print("=== NOUVEAU TOUR ===")
@@ -3605,12 +3544,6 @@ func _update_resource_labels() -> void:
 		_label_wood.text = str(_wood)
 	if _label_ore:
 		_label_ore.text = str(_ore)
-	if _resource_gold_label:
-		_resource_gold_label.text = " %d" % _gold
-	if _resource_wood_label:
-		_resource_wood_label.text = " %d" % _wood
-	if _resource_ore_label:
-		_resource_ore_label.text = " %d" % _ore
 
 func _get_viewport_size() -> Vector2:
 	return get_viewport().get_visible_rect().size
@@ -4049,7 +3982,7 @@ func _recruit_unit(city_index: int, unit_type: String, count: int) -> void:
 	if _label_ore:
 		_label_ore.text = str(_ore)
 
-func _create_town_overlay(parent: CanvasLayer) -> void:
+func _create_town_overlay() -> void:
 	_town_overlay = Panel.new()
 	_town_overlay.name = "TownOverlay"
 	_town_overlay.visible = false
@@ -4068,7 +4001,7 @@ func _create_town_overlay(parent: CanvasLayer) -> void:
 	style.corner_radius_bottom_left = 8
 	style.corner_radius_bottom_right = 8
 	_town_overlay.add_theme_stylebox_override("panel", style)
-	parent.add_child(_town_overlay)
+	add_child(_town_overlay)
 	
 	var vbox := VBoxContainer.new()
 	vbox.position = Vector2(16, 12)
@@ -4104,508 +4037,27 @@ func _create_town_overlay(parent: CanvasLayer) -> void:
 	vbox.add_child(btn_close)
 
 func _create_ui() -> void:
-	var canvas_layer: CanvasLayer = CanvasLayer.new()
-	canvas_layer.name = "UI"
-	_ui_canvas = canvas_layer
-	add_child(canvas_layer)
+	# Créer le HUD (CanvasLayer auto-contenu)
+	_hud = load("res://scripts/hud.gd").new()
+	_hud.name = "HUD"
+	add_child(_hud)
 
-	# Obtenir la taille du viewport pour un affichage dynamique
-	var vp_size: Vector2 = _get_viewport_size()
-	var screen_w: float = vp_size.x
-	var screen_h: float = vp_size.y
-	var side_panel_width: float = 220.0
-	var frame_thickness: float = 4.0
-	var map_width: float = screen_w - side_panel_width
+	# Signaux du HUD
+	_hud.gh_pressed.connect(_on_gh_pressed)
+	_hud.dh_pressed.connect(_on_dh_pressed)
+	_hud.gm_pressed.connect(_on_gm_pressed)
+	_hud.dm_pressed.connect(_on_dm_pressed)
+	_hud.dbt_pressed.connect(_end_turn)
 
-	# === CADRE DÉCORATIF AUTOUR DE LA ZONE DE CARTE ===
-	var frame_layer: CanvasLayer = CanvasLayer.new()
-	frame_layer.name = "FrameLayer"
-	frame_layer.layer = 5
-	add_child(frame_layer)
+	# Références aux labels du HUD
+	_label_gold = _hud.get_gold_label()
+	_label_wood = _hud.get_wood_label()
+	_label_ore = _hud.get_ore_label()
+	_label_date = _hud.get_date_label()
 
-	# Bordure haute
-	var top_bar: ColorRect = ColorRect.new()
-	top_bar.size = Vector2(map_width, 6)
-	top_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
-	frame_layer.add_child(top_bar)
+	_create_minimap()
 
-	# Bordure basse (séparation avec barre ressources)
-	var bot_bar: ColorRect = ColorRect.new()
-	bot_bar.size = Vector2(screen_w, 4)
-	bot_bar.position = Vector2(0, screen_h - 4)
-	bot_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
-	frame_layer.add_child(bot_bar)
-
-	# Bordure gauche
-	var left_bar: ColorRect = ColorRect.new()
-	left_bar.size = Vector2(frame_thickness, screen_h)
-	left_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
-	frame_layer.add_child(left_bar)
-
-	# Bordure droite (séparation avec panneau latéral)
-	var right_bar: ColorRect = ColorRect.new()
-	right_bar.size = Vector2(frame_thickness, screen_h)
-	right_bar.position = Vector2(map_width - frame_thickness, 0)
-	right_bar.color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
-	frame_layer.add_child(right_bar)
-
-	# Coins dorés (carrés 8x8 aux 4 coins)
-	for corner in range(4):
-		var c: ColorRect = ColorRect.new()
-		c.size = Vector2(8, 8)
-		var cx: float = 0 if corner % 2 == 0 else map_width - 8 - frame_thickness
-		var cy: float = 0 if corner < 2 else screen_h - 8
-		c.position = Vector2(cx, cy)
-		c.color = Color(0.95, 0.85, 0.20)  # Or japonais
-		frame_layer.add_child(c)
-
-	# === PANNEAU DROIT — style japonais médiéval ===
-	var side_panel: Panel = Panel.new()
-	side_panel.name = "SidePanel"
-	side_panel.size = Vector2(side_panel_width, screen_h)
-	side_panel.position = Vector2(map_width, 0)
-	var side_style: StyleBoxFlat = StyleBoxFlat.new()
-	side_style.bg_color = Color(0.08, 0.06, 0.05)  # Fond très sombre style laque noire
-	side_style.border_color = Color(0.85, 0.25, 0.25)  # Vermilion japonais
-	side_style.border_width_left = 4
-	side_style.border_width_right = 4
-	side_style.border_width_top = 4
-	side_style.border_width_bottom = 4
-	side_panel.add_theme_stylebox_override("panel", side_style)
-	canvas_layer.add_child(side_panel)
-
-	# --- MINIMAP (intégrée dans le panneau droit, tout en haut) ---
-	_create_minimap(side_panel)
-
-	# --- PORTRAIT + STATS HÉROS (sous la minimap) ---
-	var hero_block: Control = Control.new()
-	hero_block.name = "HeroBlock"
-	hero_block.position = Vector2(10, 155)  # Ajusté pour être juste sous la minimap (10 + 133 + 12)
-	hero_block.size = Vector2(200, 200)  # Augmenté la hauteur pour plus d'espace
-	side_panel.add_child(hero_block)
-
-	# Portrait (style cadre japonais avec vermilion)
-	var portrait_bg: Panel = _create_decorated_panel(Vector2(70, 70))
-	portrait_bg.position = Vector2(0, 0)
-	hero_block.add_child(portrait_bg)
-	
-	var portrait_rect: ColorRect = ColorRect.new()
-	portrait_rect.size = Vector2(60, 60)
-	portrait_rect.position = Vector2(5, 5)
-	portrait_rect.color = Color(0.18, 0.30, 0.50)
-	portrait_bg.add_child(portrait_rect)
-	
-	# Ajouter un motif japonais autour du portrait
-	var pattern_top: ColorRect = ColorRect.new()
-	pattern_top.size = Vector2(70, 4)
-	pattern_top.position = Vector2(0, 0)
-	pattern_top.color = Color(0.85, 0.25, 0.25)
-	portrait_bg.add_child(pattern_top)
-	
-	var pattern_bottom: ColorRect = ColorRect.new()
-	pattern_bottom.size = Vector2(70, 4)
-	pattern_bottom.position = Vector2(0, 66)
-	pattern_bottom.color = Color(0.85, 0.25, 0.25)
-	portrait_bg.add_child(pattern_bottom)
-
-	# Visage (peau)
-	var face: ColorRect = ColorRect.new()
-	face.size = Vector2(28, 24)
-	face.position = Vector2(16, 16)
-	face.color = Color(0.90, 0.75, 0.60)  # Teint plus clair style japonais
-	portrait_rect.add_child(face)
-
-	# Cheveux noirs
-	var hair: ColorRect = ColorRect.new()
-	hair.size = Vector2(30, 12)
-	hair.position = Vector2(15, 8)
-	hair.color = Color(0.08, 0.05, 0.03)
-	portrait_rect.add_child(hair)
-
-	# Chignon samurai
-	var topknot: ColorRect = ColorRect.new()
-	topknot.size = Vector2(8, 8)
-	topknot.position = Vector2(26, 6)
-	topknot.color = Color(0.06, 0.04, 0.02)
-	portrait_rect.add_child(topknot)
-
-	# Stats à droite du portrait
-	var stats_vbox: VBoxContainer = VBoxContainer.new()
-	stats_vbox.position = Vector2(75, 5)
-	stats_vbox.size = Vector2(115, 180)  # Augmenté la hauteur
-	stats_vbox.add_theme_constant_override("separation", 4)
-	hero_block.add_child(stats_vbox)
-
-	# --- NOM DU HÉROS ---
-	_label_hero_name = Label.new()
-	_label_hero_name.text = "Samurai"
-	_label_hero_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_label_hero_name.add_theme_color_override("font_color", Color(0.95, 0.85, 0.75))
-	_label_hero_name.add_theme_font_size_override("font_size", 14)
-	stats_vbox.add_child(_label_hero_name)
-
-	# --- BARRE DE NIVEAU ---
-	_label_level = Label.new()
-	_label_level.text = "Niveau %d" % _hero_level
-	_label_level.add_theme_color_override("font_color", Color(0.95, 0.75, 0.55))
-	_label_level.add_theme_font_size_override("font_size", 13)
-	stats_vbox.add_child(_label_level)
-
-	# Barre XP
-	var xp_panel = Panel.new()
-	xp_panel.custom_minimum_size = Vector2(110, 20)
-	var xp_style = StyleBoxFlat.new()
-	xp_style.bg_color = Color(0.08, 0.06, 0.04)
-	xp_style.corner_radius_top_left = 8
-	xp_style.corner_radius_top_right = 8
-	xp_style.corner_radius_bottom_left = 8
-	xp_style.corner_radius_bottom_right = 8
-	xp_panel.add_theme_stylebox_override("panel", xp_style)
-	stats_vbox.add_child(xp_panel)
-
-	_xp_bar_bg = ColorRect.new()
-	_xp_bar_bg.position = Vector2(3, 3)
-	_xp_bar_bg.size = Vector2(104, 14)
-	_xp_bar_bg.color = Color(0.15, 0.12, 0.08)
-	xp_panel.add_child(_xp_bar_bg)
-
-	_xp_bar_fill = ColorRect.new()
-	_xp_bar_fill.position = Vector2(3, 3)
-	_xp_bar_fill.size = Vector2(104 * float(_hero_xp) / _hero_xp_to_next, 14)
-	_xp_bar_fill.color = Color(0.95, 0.45, 0.55)  # Sakura pink
-	xp_panel.add_child(_xp_bar_fill)
-
-	_label_xp = Label.new()
-	_label_xp.position = Vector2(0, -2)
-	_label_xp.size = Vector2(110, 20)
-	_label_xp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_label_xp.text = "%d / %d XP" % [_hero_xp, _hero_xp_to_next]
-	_label_xp.add_theme_font_size_override("font_size", 10)
-	_label_xp.add_theme_color_override("font_color", Color(0.95, 0.85, 0.80))
-	xp_panel.add_child(_label_xp)
-
-	# --- BARRE DE HP ---
-	var hp_panel = Panel.new()
-	hp_panel.custom_minimum_size = Vector2(110, 20)
-	var hp_style = StyleBoxFlat.new()
-	hp_style.bg_color = Color(0.08, 0.06, 0.04)
-	hp_style.corner_radius_top_left = 8
-	hp_style.corner_radius_top_right = 8
-	hp_style.corner_radius_bottom_left = 8
-	hp_style.corner_radius_bottom_right = 8
-	hp_panel.add_theme_stylebox_override("panel", hp_style)
-	stats_vbox.add_child(hp_panel)
-
-	_hp_bar_bg = ColorRect.new()
-	_hp_bar_bg.position = Vector2(3, 3)
-	_hp_bar_bg.size = Vector2(104, 14)
-	_hp_bar_bg.color = Color(0.15, 0.08, 0.08)
-	hp_panel.add_child(_hp_bar_bg)
-
-	_hp_bar_fill = ColorRect.new()
-	_hp_bar_fill.position = Vector2(3, 3)
-	var hp_ratio = float(_hero_hp) / _hero_max_hp if _hero_max_hp > 0 else 0
-	_hp_bar_fill.size = Vector2(104 * hp_ratio, 14)
-	if hp_ratio > 0.5:
-		_hp_bar_fill.color = Color(0.25, 0.55, 0.35)  # Bamboo green
-	elif hp_ratio > 0.25:
-		_hp_bar_fill.color = Color(0.85, 0.55, 0.15)
-	else:
-		_hp_bar_fill.color = Color(0.85, 0.25, 0.25)  # Vermilion
-	hp_panel.add_child(_hp_bar_fill)
-
-	_label_hp = Label.new()
-	_label_hp.position = Vector2(0, -2)
-	_label_hp.size = Vector2(110, 20)
-	_label_hp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_label_hp.text = "HP %d / %d" % [_hero_hp, _hero_max_hp]
-	_label_hp.add_theme_font_size_override("font_size", 10)
-	_label_hp.add_theme_color_override("font_color", Color(0.95, 0.9, 0.8))
-	hp_panel.add_child(_label_hp)
-
-	# --- ATK / DEF ---
-	var atk_def_label: Label = Label.new()
-	atk_def_label.text = "ATK %d   DEF %d" % [_hero_attack, _hero_defense]
-	atk_def_label.add_theme_color_override("font_color", Color(0.65, 0.65, 0.85))  # Indigo
-	atk_def_label.add_theme_font_size_override("font_size", 12)
-	atk_def_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	stats_vbox.add_child(atk_def_label)
-
-	# --- RESSOURCES ---
-	var res_title: Label = Label.new()
-	res_title.text = "Ressources"
-	res_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	res_title.add_theme_color_override("font_color", Color(0.7, 0.6, 0.4))
-	res_title.add_theme_font_size_override("font_size", 12)
-	stats_vbox.add_child(res_title)
-
-	# Or
-	var gold_row = HBoxContainer.new()
-	gold_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	var gold_icon = ColorRect.new()
-	gold_icon.custom_minimum_size = Vector2(10, 10)
-	gold_icon.color = Color(0.95, 0.8, 0.15)
-	gold_row.add_child(gold_icon)
-	_resource_gold_label = Label.new()
-	_resource_gold_label.text = " %d" % _gold
-	_resource_gold_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.3))
-	_resource_gold_label.add_theme_font_size_override("font_size", 12)
-	gold_row.add_child(_resource_gold_label)
-	stats_vbox.add_child(gold_row)
-
-	# Bois
-	var wood_row = HBoxContainer.new()
-	wood_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	var wood_icon = ColorRect.new()
-	wood_icon.custom_minimum_size = Vector2(10, 10)
-	wood_icon.color = Color(0.55, 0.35, 0.15)
-	wood_row.add_child(wood_icon)
-	_resource_wood_label = Label.new()
-	_resource_wood_label.text = " %d" % _wood
-	_resource_wood_label.add_theme_color_override("font_color", Color(0.7, 0.5, 0.25))
-	_resource_wood_label.add_theme_font_size_override("font_size", 12)
-	wood_row.add_child(_resource_wood_label)
-	stats_vbox.add_child(wood_row)
-
-	# Minerai
-	var ore_row = HBoxContainer.new()
-	ore_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	var ore_icon = ColorRect.new()
-	ore_icon.custom_minimum_size = Vector2(10, 10)
-	ore_icon.color = Color(0.45, 0.45, 0.55)
-	ore_row.add_child(ore_icon)
-	_resource_ore_label = Label.new()
-	_resource_ore_label.text = " %d" % _ore
-	_resource_ore_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.75))
-	_resource_ore_label.add_theme_font_size_override("font_size", 12)
-	ore_row.add_child(_resource_ore_label)
-	stats_vbox.add_child(ore_row)
-
-	# --- MP (Mouvement) ---
-	var mp_row = HBoxContainer.new()
-	mp_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_label_mp = Label.new()
-	_label_mp.text = "MP %d / %d" % [_hero_mp, _hero_max_mp]
-	_label_mp.add_theme_color_override("font_color", Color(0.35, 0.65, 0.45))
-	_label_mp.add_theme_font_size_override("font_size", 12)
-	mp_row.add_child(_label_mp)
-	stats_vbox.add_child(mp_row)
-
-	# --- DATE DU JEU (sous les stats, dans le side_panel) ---
-	var date_panel: Panel = _create_decorated_panel(Vector2(180, 35))
-	date_panel.position = Vector2(20, 375)  # Positionné juste sous le hero_block (155 + 200 + 20)
-	side_panel.add_child(date_panel)
-	_label_date = Label.new()
-	_label_date.text = "Month %d  Week %d  Day %d" % [_game_month, _game_week, _game_day]
-	_label_date.size = Vector2(170, 25)
-	_label_date.position = Vector2(5, 5)
-	_label_date.add_theme_color_override("font_color", Color(0.95, 0.85, 0.70))
-	_label_date.add_theme_font_size_override("font_size", 11)
-	_label_date.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	date_panel.add_child(_label_date)
-
-	var goal_label := Label.new()
-	goal_label.text = "Objectif: vaincre %d armees" % ENEMY_COUNT
-	goal_label.position = Vector2(20, 415)
-	goal_label.size = Vector2(180, 40)
-	goal_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	goal_label.add_theme_color_override("font_color", Color(0.75, 0.65, 0.45))
-	goal_label.add_theme_font_size_override("font_size", 10)
-	side_panel.add_child(goal_label)
-
-	# --- BOUTONS ABANDONNER + FIN DE TOUR ---
-	var actions_panel: Panel = _create_decorated_panel(Vector2(180, 100))
-	actions_panel.position = Vector2(20, 565)
-	side_panel.add_child(actions_panel)
-	var actions_vbox := VBoxContainer.new()
-	actions_vbox.position = Vector2(10, 8)
-	actions_vbox.custom_minimum_size = Vector2(160, 84)
-	actions_vbox.add_theme_constant_override("separation", 8)
-	actions_panel.add_child(actions_vbox)
-	var btn_surrender: Button = Button.new()
-	btn_surrender.text = "ABANDONNER"
-	btn_surrender.custom_minimum_size = Vector2(160, 34)
-	var surrender_normal: StyleBoxFlat = StyleBoxFlat.new()
-	surrender_normal.bg_color = Color(0.22, 0.14, 0.14)
-	surrender_normal.border_color = Color(0.55, 0.35, 0.35)
-	surrender_normal.border_width_left = 2
-	surrender_normal.border_width_right = 2
-	surrender_normal.border_width_top = 2
-	surrender_normal.border_width_bottom = 2
-	surrender_normal.corner_radius_top_left = 4
-	surrender_normal.corner_radius_top_right = 4
-	surrender_normal.corner_radius_bottom_left = 4
-	surrender_normal.corner_radius_bottom_right = 4
-	btn_surrender.add_theme_stylebox_override("normal", surrender_normal)
-	var surrender_hover: StyleBoxFlat = surrender_normal.duplicate()
-	surrender_hover.bg_color = Color(0.38, 0.18, 0.18)
-	btn_surrender.add_theme_stylebox_override("hover", surrender_hover)
-	btn_surrender.add_theme_color_override("font_color", Color(0.95, 0.75, 0.75))
-	btn_surrender.add_theme_font_size_override("font_size", 11)
-	btn_surrender.pressed.connect(_on_surrender_pressed)
-	actions_vbox.add_child(btn_surrender)
-
-	# --- Bouton Plein Écran/Fenêtré ---
-	var btn_fullscreen: Button = Button.new()
-	btn_fullscreen.text = "⛶ Plein Écran"
-	btn_fullscreen.custom_minimum_size = Vector2(160, 34)
-	var fullscreen_normal: StyleBoxFlat = StyleBoxFlat.new()
-	fullscreen_normal.bg_color = Color(0.14, 0.22, 0.14)
-	fullscreen_normal.border_color = Color(0.35, 0.55, 0.35)
-	fullscreen_normal.border_width_left = 2
-	fullscreen_normal.border_width_right = 2
-	fullscreen_normal.border_width_top = 2
-	fullscreen_normal.border_width_bottom = 2
-	fullscreen_normal.corner_radius_top_left = 4
-	fullscreen_normal.corner_radius_top_right = 4
-	fullscreen_normal.corner_radius_bottom_left = 4
-	fullscreen_normal.corner_radius_bottom_right = 4
-	btn_fullscreen.add_theme_stylebox_override("normal", fullscreen_normal)
-	var fullscreen_hover: StyleBoxFlat = fullscreen_normal.duplicate()
-	fullscreen_hover.bg_color = Color(0.18, 0.38, 0.18)
-	btn_fullscreen.add_theme_stylebox_override("hover", fullscreen_hover)
-	btn_fullscreen.add_theme_color_override("font_color", Color(0.75, 0.95, 0.75))
-	btn_fullscreen.add_theme_font_size_override("font_size", 11)
-	btn_fullscreen.pressed.connect(_on_fullscreen_toggled)
-	actions_vbox.add_child(btn_fullscreen)
-	var btn_end_turn: Button = Button.new()
-	btn_end_turn.text = "FIN DE TOUR"
-	btn_end_turn.custom_minimum_size = Vector2(160, 38)
-	var btn_normal: StyleBoxFlat = StyleBoxFlat.new()
-	btn_normal.bg_color = Color(0.65, 0.20, 0.20)
-	btn_normal.border_color = Color(0.90, 0.35, 0.35)
-	btn_normal.border_width_left = 2
-	btn_normal.border_width_right = 2
-	btn_normal.border_width_top = 2
-	btn_normal.border_width_bottom = 2
-	btn_normal.corner_radius_top_left = 4
-	btn_normal.corner_radius_top_right = 4
-	btn_normal.corner_radius_bottom_left = 4
-	btn_normal.corner_radius_bottom_right = 4
-	btn_end_turn.add_theme_stylebox_override("normal", btn_normal)
-	var btn_hover: StyleBoxFlat = btn_normal.duplicate()
-	btn_hover.bg_color = Color(0.80, 0.30, 0.30)
-	btn_end_turn.add_theme_stylebox_override("hover", btn_hover)
-	btn_end_turn.add_theme_color_override("font_color", Color(1.0, 0.95, 0.85))
-	btn_end_turn.add_theme_font_size_override("font_size", 12)
-	btn_end_turn.pressed.connect(_on_end_turn_pressed)
-	actions_vbox.add_child(btn_end_turn)
-
-	# === BARRE DU BAS — ressources style japonais ===
-	var bottom_panel: Panel = Panel.new()
-	bottom_panel.name = "BottomPanel"
-	bottom_panel.size = Vector2(screen_w, 45)
-	bottom_panel.position = Vector2(0, screen_h - 45)
-	var bottom_style: StyleBoxFlat = StyleBoxFlat.new()
-	bottom_style.bg_color = Color(0.12, 0.08, 0.06)  # Fond sombre
-	bottom_style.border_color = Color(0.85, 0.25, 0.25)  # Vermilion
-	bottom_style.border_width_top = 3
-	bottom_style.border_width_bottom = 3
-	bottom_style.border_width_left = 3
-	bottom_panel.add_theme_stylebox_override("panel", bottom_style)
-	canvas_layer.add_child(bottom_panel)
-
-	# Conteneur ressources horizontal
-	var res_hbox: HBoxContainer = HBoxContainer.new()
-	res_hbox.size = Vector2(screen_w - 20, 40)
-	res_hbox.position = Vector2(10, 2)
-	res_hbox.alignment = BoxContainer.ALIGNMENT_BEGIN
-	res_hbox.add_theme_constant_override("separation", 60)
-	bottom_panel.add_child(res_hbox)
-
-	# --- Status Window (centre, style japonais) ---
-	var status_label: Label = Label.new()
-	status_label.text = "Statut"
-	status_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.70))
-	status_label.add_theme_font_size_override("font_size", 13)
-	res_hbox.add_child(status_label)
-
-	# --- Or (Koban) ---
-	var gold_icon_label: Label = Label.new()
-	gold_icon_label.text = "K"
-	gold_icon_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
-	gold_icon_label.add_theme_font_size_override("font_size", 16)
-	res_hbox.add_child(gold_icon_label)
-	_label_gold = Label.new()
-	_label_gold.text = str(_gold)
-	_label_gold.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
-	_label_gold.add_theme_font_size_override("font_size", 16)
-	res_hbox.add_child(_label_gold)
-
-	# --- Bois (Take) ---
-	var wood_icon_label: Label = Label.new()
-	wood_icon_label.text = "T"
-	wood_icon_label.add_theme_color_override("font_color", Color(0.55, 0.35, 0.15))
-	wood_icon_label.add_theme_font_size_override("font_size", 16)
-	res_hbox.add_child(wood_icon_label)
-	_label_wood = Label.new()
-	_label_wood.text = str(_wood)
-	_label_wood.add_theme_color_override("font_color", Color(0.6, 0.9, 0.4))
-	_label_wood.add_theme_font_size_override("font_size", 16)
-	res_hbox.add_child(_label_wood)
-
-	# --- Minerai (Kuromu) ---
-	var ore_icon_label: Label = Label.new()
-	ore_icon_label.text = "K"
-	ore_icon_label.add_theme_color_override("font_color", Color(0.55, 0.55, 0.65))
-	ore_icon_label.add_theme_font_size_override("font_size", 16)
-	res_hbox.add_child(ore_icon_label)
-	_label_ore = Label.new()
-	_label_ore.text = str(_ore)
-	_label_ore.add_theme_color_override("font_color", Color(0.75, 0.75, 0.85))
-	_label_ore.add_theme_font_size_override("font_size", 16)
-	res_hbox.add_child(_label_ore)
-
-	# --- Bouton Sauvegarder ---
-	var btn_save: Button = Button.new()
-	btn_save.text = "💾 Sauver"
-	btn_save.custom_minimum_size = Vector2(90, 30)
-	btn_save.add_theme_font_size_override("font_size", 12)
-	btn_save.add_theme_color_override("font_color", Color(0.85, 0.85, 0.75))
-	var save_style = StyleBoxFlat.new()
-	save_style.bg_color = Color(0.12, 0.10, 0.06)
-	save_style.border_color = Color(0.45, 0.38, 0.22)
-	save_style.border_width_left = 1
-	save_style.border_width_right = 1
-	save_style.border_width_top = 1
-	save_style.border_width_bottom = 3
-	save_style.corner_radius_top_left = 6
-	save_style.corner_radius_top_right = 6
-	save_style.corner_radius_bottom_left = 6
-	save_style.corner_radius_bottom_right = 6
-	btn_save.add_theme_stylebox_override("normal", save_style)
-	var save_hover = save_style.duplicate()
-	save_hover.bg_color = Color(0.22, 0.18, 0.10)
-	btn_save.add_theme_stylebox_override("hover", save_hover)
-	btn_save.pressed.connect(_on_save_game_pressed)
-	res_hbox.add_child(btn_save)
-
-	# --- Bouton Menu ---
-	var btn_menu: Button = Button.new()
-	btn_menu.text = "☰ Menu"
-	btn_menu.custom_minimum_size = Vector2(80, 30)
-	btn_menu.add_theme_font_size_override("font_size", 12)
-	btn_menu.add_theme_color_override("font_color", Color(0.85, 0.85, 0.75))
-	var menu_style = StyleBoxFlat.new()
-	menu_style.bg_color = Color(0.12, 0.10, 0.06)
-	menu_style.border_color = Color(0.45, 0.38, 0.22)
-	menu_style.border_width_left = 1
-	menu_style.border_width_right = 1
-	menu_style.border_width_top = 1
-	menu_style.border_width_bottom = 3
-	menu_style.corner_radius_top_left = 6
-	menu_style.corner_radius_top_right = 6
-	menu_style.corner_radius_bottom_left = 6
-	menu_style.corner_radius_bottom_right = 6
-	btn_menu.add_theme_stylebox_override("normal", menu_style)
-	var menu_hover = menu_style.duplicate()
-	menu_hover.bg_color = Color(0.22, 0.18, 0.10)
-	btn_menu.add_theme_stylebox_override("hover", menu_hover)
-	btn_menu.pressed.connect(_on_menu_pressed)
-	res_hbox.add_child(btn_menu)
-
-	_create_town_overlay(canvas_layer)
-	print("✓ Interface HoMM3 (panneau droit + barre du bas) créée")
+	print("✓ HUD instancié et connecté")
 
 func _create_decorated_panel(size: Vector2) -> Panel:
 	var panel: Panel = Panel.new()
@@ -4664,7 +4116,6 @@ var _current_enemy_index: int = -1
 var _town_overlay: Panel = null
 var _town_title_label: Label = null
 var _game_overlay: Control = null
-var _ui_canvas: CanvasLayer = null
 var _game_over_active: bool = false
 
 # Système de niveau et expérience
@@ -4742,6 +4193,8 @@ var _minimap_scale: float = 0.0
 const DEBUG_LOG: bool = false
 var _visited_cities: Dictionary = {}
 var _game_over_layer: CanvasLayer = null
+var _hud: CanvasLayer = null
+var _selected_dest_tile: Vector2i = Vector2i.ZERO
 var _camera_zoom_min: float = 0.28
 var _camera_zoom_default: float = 0.4
 const XP_DISCOVER_TILE: int = 3
@@ -4787,12 +4240,6 @@ var _cities_data: Array = []
 var _selected_city_index: int = -1
 var _town_screen_open: bool = false
 var _last_city_visit_index: int = -1
-
-# ============================================================
-# SYSTÈME HOMURA : FIN DE TOUR
-# ============================================================
-var _end_turn_button: Button = null
-var _label_mp: Label = null  # Label pour afficher les MP
 
 func _create_cities() -> void:
 	# Créer des villes à des positions aléatoires sur la carte
@@ -5084,81 +4531,60 @@ func _create_resources() -> void:
 		
 		print("Ressource ", i + 1, " créée : ", res_name, " à la position : ", res_pos)
 
-func _create_minimap(parent: Control) -> void:
-	# Conteneur avec cadre doré - ratio 60:40 pour correspondre à toute la map
-	var minimap_width: float = 200.0  # Ajusté pour rentrer dans le panneau latéral de 220px
-	var minimap_height: float = minimap_width * float(_zone_h) / float(_zone_w)  # 200 * 40/60 = 133
-	
-	var container: Panel = Panel.new()
-	container.name = "MinimapContainer"
-	container.size = Vector2(minimap_width, minimap_height)
-	container.position = Vector2(10, 10)
-	var container_style: StyleBoxFlat = StyleBoxFlat.new()
-	container_style.bg_color = Color(0.15, 0.10, 0.05)
-	container_style.border_color = Color(0.72, 0.52, 0.25)
-	container_style.border_width_left = 3
-	container_style.border_width_right = 3
-	container_style.border_width_top = 3
-	container_style.border_width_bottom = 3
-	container_style.corner_radius_top_left = 6
-	container_style.corner_radius_top_right = 6
-	container_style.corner_radius_bottom_left = 6
-	container_style.corner_radius_bottom_right = 6
-	container.add_theme_stylebox_override("panel", container_style)
-	parent.add_child(container)
+func _create_minimap() -> void:
+	if _hud == null:
+		return
+	var minimap_container: Control = _hud.get_minimap_container()
+	if minimap_container == null:
+		return
 
 	_minimap_panel = Control.new()
 	_minimap_panel.name = "MinimapZone"
-	_minimap_panel.size = Vector2(minimap_width - 6, minimap_height - 6)
+	_minimap_panel.size = Vector2(194, 130)
 	_minimap_panel.position = Vector2(3, 3)
-	container.add_child(_minimap_panel)
+	minimap_container.add_child(_minimap_panel)
 
-	# Fond vert (représente l'herbe de la zone de jeu)
 	var bg: ColorRect = ColorRect.new()
-	bg.size = Vector2(minimap_width - 6, minimap_height - 6)
-	bg.color = Color(0.2, 0.5, 0.2)  # Vert herbe comme la zone de jeu
+	bg.size = Vector2(194, 130)
+	bg.color = Color(0.2, 0.5, 0.2)
 	_minimap_panel.add_child(bg)
 
-	# Calculer le scale pour que la zone 60×40 (toute la map) remplisse exactement la minimap
-	var scale_x: float = (minimap_width - 6) / float(_zone_w * TILE_SIZE)
-	var scale_y: float = (minimap_height - 6) / float(_zone_h * TILE_SIZE)
-	var scale: float = min(scale_x, scale_y)
+	var scale_mini: float = min(194.0 / float(_zone_w * TILE_SIZE), 130.0 / float(_zone_h * TILE_SIZE))
 
 	for city_pos in _cities:
 		var dot: ColorRect = ColorRect.new()
 		dot.size = Vector2(8, 8)
 		dot.color = Color(1, 0, 0)
-		dot.position = Vector2(city_pos.x * scale - 4, city_pos.y * scale - 4)
+		dot.position = Vector2(city_pos.x * scale_mini - 4, city_pos.y * scale_mini - 4)
 		_minimap_panel.add_child(dot)
 
 	for enemy in _enemies:
 		var dot: ColorRect = ColorRect.new()
 		dot.size = Vector2(6, 6)
 		dot.color = Color(0.8, 0, 0.8)
-		dot.position = Vector2(enemy["position"].x * scale - 3, enemy["position"].y * scale - 3)
+		dot.position = Vector2(enemy["position"].x * scale_mini - 3, enemy["position"].y * scale_mini - 3)
 		_minimap_panel.add_child(dot)
 
 	for res in _resources:
 		var dot: ColorRect = ColorRect.new()
 		dot.size = Vector2(5, 5)
 		dot.color = Color(1, 0.8, 0)
-		dot.position = Vector2(res["position"].x * scale - 2.5, res["position"].y * scale - 2.5)
+		dot.position = Vector2(res["position"].x * scale_mini - 2.5, res["position"].y * scale_mini - 2.5)
 		_minimap_panel.add_child(dot)
 
 	for chest in _treasures:
 		var dot: ColorRect = ColorRect.new()
 		dot.size = Vector2(6, 6)
 		dot.color = Color(1, 1, 1)
-		dot.position = Vector2(chest["position"].x * scale - 3, chest["position"].y * scale - 3)
+		dot.position = Vector2(chest["position"].x * scale_mini - 3, chest["position"].y * scale_mini - 3)
 		_minimap_panel.add_child(dot)
 
-	# Héros (position centrée sur la zone 60×40 - toute la map)
 	var start_hero_x: float = (_zone_w / 2.0) * TILE_SIZE + TILE_SIZE / 2.0
 	var start_hero_y: float = (_zone_h / 2.0) * TILE_SIZE + TILE_SIZE / 2.0
 	_minimap_hero_dot = ColorRect.new()
 	_minimap_hero_dot.size = Vector2(10, 10)
 	_minimap_hero_dot.color = Color(0, 0.5, 1)
-	_minimap_hero_dot.position = Vector2(start_hero_x * scale - 5, start_hero_y * scale - 5)
+	_minimap_hero_dot.position = Vector2(start_hero_x * scale_mini - 5, start_hero_y * scale_mini - 5)
 	_minimap_panel.add_child(_minimap_hero_dot)
 
 	var hero_border: ColorRect = ColorRect.new()
@@ -5167,7 +4593,7 @@ func _create_minimap(parent: Control) -> void:
 	hero_border.color = Color(1, 1, 1)
 	_minimap_hero_dot.add_child(hero_border)
 
-	_minimap_scale = scale
+	_minimap_scale = scale_mini
 	if DEBUG_LOG:
 		print("✓ Minimap créée")
 
@@ -5257,6 +4683,82 @@ func _on_fullscreen_toggled() -> void:
 	else:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 
+func _on_gh_pressed() -> void:
+	# GH = Basculer la minimap
+	if _minimap_panel != null:
+		var container: Control = _minimap_panel.get_parent() as Control
+		if container != null:
+			container.visible = not container.visible
+
+func _on_dh_pressed() -> void:
+	# DH = Afficher les détails du héros
+	var gd = GameData
+	if gd.current_mode == GameData.SelectionMode.HERO and gd.current_id >= 0 and gd.current_id < gd.heroes.size():
+		var h = gd.heroes[gd.current_id]
+		var info = "%s (Niv.%d)\nATK %d DEF %d\nHP %d/%d\nArmée: %d créatures" % [
+			h.name, _hero_level,
+			_hero_attack, _hero_defense,
+			_hero_hp, _hero_max_hp,
+			_hero_army_count()
+		]
+		_create_floating_text(info, Color(0.9, 0.85, 0.7), _hero.position + Vector2(0, -80))
+	elif gd.heroes.size() > 0:
+		var h = gd.heroes[0]
+		gd.set_selection(GameData.SelectionMode.HERO, 0, h.position)
+		_on_dh_pressed()
+
+func _on_gm_pressed() -> void:
+	# GM = Afficher la carte du monde (zoom arrière)
+	_camera.zoom = Vector2(_camera_zoom_min, _camera_zoom_min)
+	_create_floating_text("Carte du monde", Color(0.7, 0.9, 0.7), _get_viewport_center())
+
+func _on_dm_pressed() -> void:
+	# DM = Afficher les détails du contexte sélectionné
+	var gd = GameData
+	match gd.current_mode:
+		GameData.SelectionMode.CITY:
+			if gd.current_id >= 0 and gd.current_id < gd.cities.size():
+				var c = gd.cities[gd.current_id]
+				var info = "🏯 %s\nRevenu: %d/jour\nGarnison: %d créatures" % [
+					c.name, c.resource_per_day, _city_garrison_count(gd.current_id)
+				]
+				_create_floating_text(info, Color(0.85, 0.9, 0.5), _get_viewport_center())
+		GameData.SelectionMode.HERO:
+			_on_dh_pressed()
+		GameData.SelectionMode.TILE:
+			var ct = _creature_on_tile(gd.current_tile)
+			if ct != null:
+				_create_floating_text("%s x%d\nTappez pour interagir" % [ct.name, ct.amount], Color(0.9, 0.85, 0.7), _get_viewport_center())
+			else:
+				_create_floating_text("Terrain libre", Color(0.6, 0.7, 0.6), _get_viewport_center())
+		_:
+			_create_floating_text("Rien de sélectionné", Color(0.6, 0.6, 0.6), _get_viewport_center())
+
+func _get_viewport_center() -> Vector2:
+	var vp = get_viewport().get_visible_rect().size
+	return Vector2(vp.x / 2.0, vp.y / 2.0)
+
+func _hero_army_count() -> int:
+	var total = 0
+	for unit in _hero_army:
+		total += unit.get("count", 0)
+	return total
+
+func _city_garrison_count(city_index: int) -> int:
+	if city_index >= 0 and city_index < _cities_data.size():
+		return _cities_data[city_index].get("garrison", []).size()
+	return 0
+
+func _creature_on_tile(tile: Vector2i) -> GameData.Creature:
+	if GameData.creatures_on_tile.has(tile):
+		return GameData.creatures_on_tile[tile]
+	return null
+
+func _on_dbt_pressed() -> void:
+	# DBT = Fin de tour + journal
+	_end_turn()
+	_create_floating_text("Tour terminé", Color(0.7, 0.9, 0.7), _get_viewport_center())
+
 func _save_game() -> void:
 	var save_data = {
 		"hero_level": _hero_level,
@@ -5342,36 +4844,78 @@ func _load_game() -> void:
 	print("📂 Partie chargée avec succès! Niveau ", _hero_level)
 
 func _update_hero_panel() -> void:
-	if _label_level != null:
-		_label_level.text = "Niveau %d" % _hero_level
-	
-	if _xp_bar_fill != null and _hero_xp_to_next > 0:
-		var xp_ratio: float = clampf(float(_hero_xp) / float(_hero_xp_to_next), 0.0, 1.0)
-		_xp_bar_fill.size = Vector2(104 * xp_ratio, 14)
-	
-	if _label_xp != null:
-		_label_xp.text = "%d / %d XP" % [_hero_xp, _hero_xp_to_next]
-	
-	if _hp_bar_fill != null and _hero_max_hp > 0:
-		var hp_ratio: float = clampf(float(_hero_hp) / float(_hero_max_hp), 0.0, 1.0)
-		_hp_bar_fill.size = Vector2(104 * hp_ratio, 14)
-		if hp_ratio > 0.5:
-			_hp_bar_fill.color = Color(0.2, 0.7, 0.25)
-		elif hp_ratio > 0.25:
-			_hp_bar_fill.color = Color(0.85, 0.55, 0.1)
-		else:
-			_hp_bar_fill.color = Color(0.8, 0.15, 0.15)
-	
-	if _label_hp != null:
-		_label_hp.text = "HP %d / %d" % [_hero_hp, _hero_max_hp]
-	
-	if _resource_gold_label != null:
-		_resource_gold_label.text = " %d" % _gold
-	if _resource_wood_label != null:
-		_resource_wood_label.text = " %d" % _wood
-	if _resource_ore_label != null:
-		_resource_ore_label.text = " %d" % _ore
+	# Hero stats are managed by the HUD
+	pass
 
 func _update_date_label() -> void:
 	if _label_date != null:
 		_label_date.text = "Month %d  Week %d  Day %d" % [_game_month, _game_week, _game_day]
+
+func _register_game_data() -> void:
+	# Nettoyer les anciennes données
+	GameData.heroes.clear()
+	GameData.cities.clear()
+	GameData.buildings.clear()
+	GameData.creatures_on_tile.clear()
+
+	# Enregistrer le héros du joueur
+	var hero_data = GameData.Hero.new()
+	hero_data.id = 0
+	hero_data.name = "Samurai"
+	hero_data.sprite = null
+	hero_data.position = Vector2i(_zone_w / 2, _zone_h / 2)
+	hero_data.owner = 0
+	hero_data.creatures = [
+		_creature("Piquier", 12),
+		_creature("Archer", 8),
+		_creature("Espadon", 4),
+	]
+	GameData.heroes.append(hero_data)
+
+	# Enregistrer les villes
+	for i in range(_cities_data.size()):
+		var cdata = _cities_data[i]
+		var city_data = GameData.City.new()
+		city_data.id = i
+		city_data.name = "Ville %d" % (i + 1)
+		city_data.position = _cities_data_to_tile(cdata["position"])
+		city_data.owner = 0 if cdata.get("owned", false) else 1
+		city_data.resource_type = "Or"
+		city_data.resource_per_day = cdata.get("income", 500)
+		city_data.creatures = []
+		if cdata.get("owned", false):
+			city_data.creatures = [
+				_creature("Piquier", 20),
+				_creature("Archer", 10),
+			]
+		GameData.cities.append(city_data)
+
+	print("✓ GameData enregistré: %d héros, %d villes" % [GameData.heroes.size(), GameData.cities.size()])
+
+func _spawn_neutral_creatures() -> void:
+	var rng = RandomNumberGenerator.new()
+	rng.randomize()
+	var types = ["Loup", "Gobelin", "Squelette", "Araignée", "Lézard"]
+	for i in range(12):
+		var tx = rng.randi_range(3, _zone_w - 4)
+		var ty = rng.randi_range(3, _zone_h - 4)
+		var tile = Vector2i(tx, ty)
+		if tile == GameData.heroes[0].position:
+			continue
+		var c = GameData.Creature.new()
+		c.name = types[i % types.size()]
+		c.amount = rng.randi_range(5, 25)
+		GameData.creatures_on_tile[tile] = c
+	print("✓ %d créatures neutres dispersées sur la carte" % GameData.creatures_on_tile.size())
+
+func _creature(name: String, amount: int) -> GameData.Creature:
+	var c = GameData.Creature.new()
+	c.name = name
+	c.amount = amount
+	return c
+
+func _cities_data_to_tile(world_pos: Vector2) -> Vector2i:
+	return Vector2i(
+		int(world_pos.x / TILE_SIZE),
+		int(world_pos.y / TILE_SIZE)
+	)
