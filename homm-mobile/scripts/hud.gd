@@ -43,6 +43,8 @@ signal quest_pressed()
 signal dbt_pressed()
 signal pause_state_changed(is_paused: bool)
 signal save_requested()
+signal zoom_in_requested()
+signal zoom_out_requested()
 
 func _ready() -> void:
 	_build_layout()
@@ -471,6 +473,44 @@ func _build_layout():
 	_pause_btn.add_theme_color_override("font_color", Color(0.95, 0.85, 0.75))
 	_pause_btn.pressed.connect(_on_pause_pressed)
 	add_child(_pause_btn)
+
+	# --- Zoom buttons (below pause button) ---
+	var zoom_in_btn := Button.new()
+	zoom_in_btn.name = "ZoomInBtn"
+	zoom_in_btn.text = "+"
+	zoom_in_btn.position = Vector2(8, H - 176)
+	zoom_in_btn.size = Vector2(50, 36)
+	var zbs := StyleBoxFlat.new()
+	zbs.bg_color = Color(0.12, 0.10, 0.06, 0.85)
+	zbs.border_color = Color(0.45, 0.38, 0.22)
+	zbs.border_width_left = 1
+	zbs.border_width_right = 1
+	zbs.border_width_top = 1
+	zbs.border_width_bottom = 1
+	zbs.corner_radius_top_left = 6
+	zbs.corner_radius_top_right = 6
+	zbs.corner_radius_bottom_left = 6
+	zbs.corner_radius_bottom_right = 6
+	zoom_in_btn.add_theme_stylebox_override("normal", zbs)
+	var zbs_hover := zbs.duplicate()
+	zbs_hover.bg_color = Color(0.22, 0.18, 0.10, 0.9)
+	zoom_in_btn.add_theme_stylebox_override("hover", zbs_hover)
+	zoom_in_btn.add_theme_font_size_override("font_size", 20)
+	zoom_in_btn.add_theme_color_override("font_color", Color(0.95, 0.85, 0.75))
+	zoom_in_btn.pressed.connect(func(): zoom_in_requested.emit())
+	add_child(zoom_in_btn)
+
+	var zoom_out_btn := Button.new()
+	zoom_out_btn.name = "ZoomOutBtn"
+	zoom_out_btn.text = "−"
+	zoom_out_btn.position = Vector2(8, H - 136)
+	zoom_out_btn.size = Vector2(50, 36)
+	zoom_out_btn.add_theme_stylebox_override("normal", zbs)
+	zoom_out_btn.add_theme_stylebox_override("hover", zbs_hover)
+	zoom_out_btn.add_theme_font_size_override("font_size", 20)
+	zoom_out_btn.add_theme_color_override("font_color", Color(0.95, 0.85, 0.75))
+	zoom_out_btn.pressed.connect(func(): zoom_out_requested.emit())
+	add_child(zoom_out_btn)
 
 func _make_top_btn(text: String) -> Button:
 	var btn = Button.new()

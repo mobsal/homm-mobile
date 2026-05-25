@@ -2088,17 +2088,11 @@ func _input(event: InputEvent) -> void:
 	if _camera != null and event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_wheel_debounce = 0.2
-			var new_zoom: float = _camera.zoom.x + ZOOM_STEP
-			new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
-			_camera.zoom = Vector2(new_zoom, new_zoom)
-			_clamp_camera_to_map()
+			_zoom_in()
 			return
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_wheel_debounce = 0.2
-			var new_zoom: float = _camera.zoom.x - ZOOM_STEP
-			new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
-			_camera.zoom = Vector2(new_zoom, new_zoom)
-			_clamp_camera_to_map()
+			_zoom_out()
 			return
 
 	# Drag tactile ou souris pour déplacer la caméra
@@ -2106,24 +2100,46 @@ func _input(event: InputEvent) -> void:
 		if _wheel_debounce > 0.0:
 			return
 		if event.pressed:
-			_is_dragging = false
-			_drag_start_pos = event.position
-		elif _is_dragging:
-			_is_dragging = false
-			return
+			_touch_points[event.index] = event.position
+			if _touch_points.size() >= 2:
+				var positions := _touch_points.values()
+				_pinch_last_dist = positions[0].distance_to(positions[1])
+			else:
+				_is_dragging = false
+				_drag_start_pos = event.position
 		else:
-			# Tap court → déplacement héros
-			_handle_tap(event.position)
+			_touch_points.erase(event.index)
+			if _touch_points.size() < 2 and _is_dragging:
+				_is_dragging = false
+				return
+			if _touch_points.size() < 2 and not _is_dragging:
+				_handle_tap(event.position)
 		return
 
 	if event is InputEventScreenDrag:
 		if _wheel_debounce > 0.0:
 			return
-		if not _is_dragging:
+		_touch_points[event.index] = event.position
+		if _touch_points.size() >= 2:
+			var positions := _touch_points.values()
+			var dist := positions[0].distance_to(positions[1])
+			if _pinch_last_dist > 0:
+				var ratio := dist / _pinch_last_dist
+				if ratio > 1.02:
+					_zoom_in()
+					_pinch_last_dist = dist
+				elif ratio < 0.98:
+					_zoom_out()
+					_pinch_last_dist = dist
+				else:
+					_pinch_last_dist = dist
+			else:
+				_pinch_last_dist = dist
+		elif not _is_dragging:
 			if _drag_start_pos.distance_to(event.position) > _drag_threshold:
 				_is_dragging = true
 				_camera_follow_hero = false
-		if _is_dragging and _camera:
+		if _is_dragging and _camera and _touch_points.size() < 2:
 			_camera.position -= event.relative * 2.5
 			_clamp_camera_to_map()
 		return
@@ -2922,6 +2938,22 @@ func _clamp_camera_to_map() -> void:
 		max_y = center
 	_camera.position.x = clampf(_camera.position.x, min_x, max_x)
 	_camera.position.y = clampf(_camera.position.y, min_y, max_y)
+
+func _zoom_in() -> void:
+	if not _camera:
+		return
+	var new_zoom: float = _camera.zoom.x + ZOOM_STEP
+	new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
+	_camera.zoom = Vector2(new_zoom, new_zoom)
+	_clamp_camera_to_map()
+
+func _zoom_out() -> void:
+	if not _camera:
+		return
+	var new_zoom: float = _camera.zoom.x - ZOOM_STEP
+	new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
+	_camera.zoom = Vector2(new_zoom, new_zoom)
+	_clamp_camera_to_map()
 
 func _check_enemy_encounter() -> void:
 	# Vérifier si le héros est proche d'un ennemi
@@ -3979,6 +4011,8 @@ func _create_ui() -> void:
 	_hud.hero_selected.connect(_on_hud_hero_selected)
 	_hud.pause_state_changed.connect(_on_pause_state_changed)
 	_hud.save_requested.connect(_on_save_requested)
+	_hud.zoom_in_requested.connect(_zoom_in)
+	_hud.zoom_out_requested.connect(_zoom_out)
 
 	# Références aux labels du HUD
 	_label_gold = _hud.get_gold_label()
@@ -4250,6 +4284,8 @@ var _game_overlay: Control = null
 # === ZOOM CAMÉRA ===
 var _camera_zoom_min: float = 0.0
 var _camera_zoom_default: float = 1.42
+var _touch_points: Dictionary = {}
+var _pinch_last_dist: float = 0.0
 
 # === HUD ===
 var _hud: CanvasLayer = null
