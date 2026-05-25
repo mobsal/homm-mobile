@@ -3,6 +3,10 @@ extends Node
 var _player: AudioStreamPlayer
 var _theme: String = "exploration"
 
+var _menu_player: AudioStreamPlayer
+var _menu_restart_timer: Timer
+var _menu_stream: AudioStreamMP3
+
 var _hirajoshi: Array[float] = [220.0, 233.08, 277.18, 311.13, 349.23, 440.0]
 var _hirajoshi_high: Array[float] = [440.0, 466.16, 554.37, 622.25, 698.46, 880.0]
 var _pentatonic: Array[float] = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25]
@@ -12,18 +16,42 @@ func _ready() -> void:
 	_player.name = "BGMPlayer"
 	_player.volume_db = -10.0
 	add_child(_player)
-	call_deferred("_start_bgm")
 
-func _start_bgm() -> void:
-	_player.stream = _build_exploration_loop()
-	_player.play()
+	_menu_player = AudioStreamPlayer.new()
+	_menu_player.name = "MenuPlayer"
+	_menu_player.volume_db = -10.0
+	add_child(_menu_player)
+	_menu_player.finished.connect(_on_menu_finished)
 
-func get_volume() -> float:
-	return _player.volume_db if _player else -10.0
+	_menu_restart_timer = Timer.new()
+	_menu_restart_timer.one_shot = true
+	_menu_restart_timer.timeout.connect(_restart_menu_music)
+	add_child(_menu_restart_timer)
 
-func set_volume(value: float) -> void:
-	if _player:
-		_player.volume_db = value
+	_menu_stream = load("res://assets/music/menu.mp3")
+	if _menu_stream:
+		print("✓ Menu music loaded")
+	else:
+		print("⚠ Failed to load menu.mp3")
+
+func _on_menu_finished() -> void:
+	_menu_restart_timer.start(2.0)
+
+func _restart_menu_music() -> void:
+	_menu_player.play()
+
+func play_menu() -> void:
+	if not _menu_stream:
+		return
+	if _player.playing:
+		_player.stop()
+	_menu_player.stream = _menu_stream
+	_menu_player.play()
+
+func stop_menu() -> void:
+	_menu_player.stop()
+	_menu_restart_timer.stop()
+	_start_bgm()
 
 func play() -> void:
 	if _player and not _player.playing:
@@ -33,9 +61,26 @@ func stop() -> void:
 	if _player:
 		_player.stop()
 
+func set_volume_db(value: float) -> void:
+	if _player:
+		_player.volume_db = value
+	if _menu_player:
+		_menu_player.volume_db = value
+
+func get_volume() -> float:
+	return _player.volume_db if _player else -10.0
+
+func set_volume(value: float) -> void:
+	if _player:
+		_player.volume_db = value
+	if _menu_player:
+		_menu_player.volume_db = value
+
 func switch_to_combat() -> void:
 	if _theme == "combat":
 		return
+	_menu_player.stop()
+	_menu_restart_timer.stop()
 	_theme = "combat"
 	_player.stream = _build_combat_loop()
 	_player.play()
@@ -43,6 +88,13 @@ func switch_to_combat() -> void:
 func switch_to_exploration() -> void:
 	if _theme == "exploration":
 		return
+	_menu_player.stop()
+	_menu_restart_timer.stop()
+	_theme = "exploration"
+	_player.stream = _build_exploration_loop()
+	_player.play()
+
+func _start_bgm() -> void:
 	_theme = "exploration"
 	_player.stream = _build_exploration_loop()
 	_player.play()
@@ -165,7 +217,7 @@ func _build_combat_loop() -> AudioStreamWAV:
 	data.resize(n * 2)
 
 	var bass_beats: Array[int] = [0, 0, 2, 2, 4, 4, 5, 5, 0, 0, 3, 3, 4, 4, 5, 5, 0, 0, 2, 2, 4, 4, 5, 5, 0, 0, 3, 3, 4, 4, 5, 5]
-	var _accent: Array[bool] = [true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false]  # size 32 but we check beat % 4 == 0
+	var _accent: Array[bool] = [true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false]
 
 	for i in range(n):
 		var t: float = float(i) / float(sr)

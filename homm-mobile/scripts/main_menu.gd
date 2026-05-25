@@ -42,6 +42,8 @@ func _ready() -> void:
 
 	print("  ThemeDB.fallback_font = ", ThemeDB.fallback_font)
 	
+	RetroBGM.play_menu()
+	
 	# Fond sombre
 	var bg = ColorRect.new()
 	bg.color = COLOR_DARK_BG
@@ -353,6 +355,7 @@ func _show_hero_creation() -> void:
 			var da = DirAccess.open("user://")
 			if da:
 				da.remove("save_game.json")
+		RetroBGM.stop_menu()
 		LoadingScreen.show_loading()
 		await get_tree().process_frame
 		get_tree().change_scene_to_file("res://scenes/tile_map_world.tscn")
@@ -391,6 +394,7 @@ func _on_continue_pressed() -> void:
 	if SFX and SFX.has_method("play_click"):
 		SFX.play_click()
 	GameData.should_load_save = true
+	RetroBGM.stop_menu()
 	LoadingScreen.show_loading()
 	await get_tree().process_frame
 	get_tree().change_scene_to_file("res://scenes/tile_map_world.tscn")
