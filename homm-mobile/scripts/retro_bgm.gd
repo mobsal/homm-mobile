@@ -96,6 +96,7 @@ func switch_to_combat() -> void:
 	_menu_restart_timer.stop()
 	_theme = "combat"
 	if _combat_stream:
+		_player.volume_db = -16.0
 		_player.stream = _combat_stream
 		_player.play()
 
@@ -106,14 +107,14 @@ func switch_to_exploration() -> void:
 	_menu_restart_timer.stop()
 	_theme = "exploration"
 	if _explo_stream:
-		_player.volume_db = -14.0
+		_player.volume_db = -18.0
 		_player.stream = _explo_stream
 		_player.play()
 
 func _start_bgm() -> void:
 	_theme = "exploration"
 	if _explo_stream:
-		_player.volume_db = -14.0
+		_player.volume_db = -18.0
 		_player.stream = _explo_stream
 		_player.play()
 
