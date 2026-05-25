@@ -1,7 +1,7 @@
 extends Node
 
 var _player: AudioStreamPlayer
-var _theme: String = "exploration"
+var _theme: String = ""
 
 var _menu_player: AudioStreamPlayer
 var _menu_restart_timer: Timer
