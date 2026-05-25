@@ -4027,13 +4027,13 @@ func _create_ui() -> void:
 	sys_overlay.name = "SystemOverlay"
 	sys_overlay.layer = 128
 	add_child(sys_overlay)
-	var pause_btn := _hud.get_pause_button()
+	var pause_btn: Button = _hud.get_pause_button()
 	if pause_btn:
 		pause_btn.reparent(sys_overlay)
-	var zin_btn := _hud.get_zoom_in_button()
+	var zin_btn: Button = _hud.get_zoom_in_button()
 	if zin_btn:
 		zin_btn.reparent(sys_overlay)
-	var zout_btn := _hud.get_zoom_out_button()
+	var zout_btn: Button = _hud.get_zoom_out_button()
 	if zout_btn:
 		zout_btn.reparent(sys_overlay)
 
