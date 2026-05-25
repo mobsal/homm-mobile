@@ -3976,6 +3976,7 @@ func _create_ui() -> void:
 	_hud.quest_pressed.connect(_toggle_quest_panel)
 	_hud.hero_selected.connect(_on_hud_hero_selected)
 	_hud.pause_state_changed.connect(_on_pause_state_changed)
+	_hud.save_requested.connect(_on_save_requested)
 
 	# Références aux labels du HUD
 	_label_gold = _hud.get_gold_label()
@@ -5260,6 +5261,11 @@ func _creature_on_tile(tile: Vector2i) -> GameData.Creature:
 
 func _on_pause_state_changed(is_paused: bool) -> void:
 	_pause_active = is_paused
+
+func _on_save_requested() -> void:
+	_save_game()
+	GameData.save_game()
+	_create_floating_text("💾 Partie sauvegardée !", Color(0.4, 0.8, 0.4), _hero.position)
 
 func _on_dbt_pressed() -> void:
 	# DBT = Fin de tour + journal

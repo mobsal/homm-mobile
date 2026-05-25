@@ -42,6 +42,7 @@ signal dm_pressed()
 signal quest_pressed()
 signal dbt_pressed()
 signal pause_state_changed(is_paused: bool)
+signal save_requested()
 
 func _ready() -> void:
 	_build_layout()
@@ -643,6 +644,12 @@ func _on_pause_pressed() -> void:
 	pause_state_changed.emit(true)
 	_show_pause_menu()
 
+func _on_save_pressed() -> void:
+	if SFX and SFX.has_method("play_click"):
+		SFX.play_click()
+	save_requested.emit()
+	_hide_pause_menu()
+
 func _show_pause_menu() -> void:
 	if _pause_overlay:
 		return
@@ -695,6 +702,19 @@ func _show_pause_menu() -> void:
 	btn_continue.pressed.connect(_hide_pause_menu)
 	_jap_theme.add_hover_scale(btn_continue, 1.04)
 	vbox.add_child(btn_continue)
+
+	vbox.add_child(_make_spacer(4))
+
+	var btn_save := Button.new()
+	btn_save.text = "Sauvegarder"
+	btn_save.custom_minimum_size = Vector2(280, 50)
+	btn_save.add_theme_font_size_override("font_size", 18)
+	btn_save.add_theme_color_override("font_color", Color(0.95, 0.9, 0.8))
+	btn_save.add_theme_stylebox_override("normal", bs)
+	btn_save.add_theme_stylebox_override("hover", bs_hover)
+	btn_save.pressed.connect(_on_save_pressed)
+	_jap_theme.add_hover_scale(btn_save, 1.04)
+	vbox.add_child(btn_save)
 
 	vbox.add_child(_make_spacer(4))
 
