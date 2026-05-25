@@ -7,6 +7,7 @@ var _menu_player: AudioStreamPlayer
 var _menu_restart_timer: Timer
 var _menu_stream: AudioStreamMP3
 var _explo_stream: AudioStreamMP3
+var _combat_stream: AudioStreamMP3
 
 var _hirajoshi: Array[float] = [220.0, 233.08, 277.18, 311.13, 349.23, 440.0]
 var _hirajoshi_high: Array[float] = [440.0, 466.16, 554.37, 622.25, 698.46, 880.0]
@@ -40,6 +41,12 @@ func _ready() -> void:
 		print("✓ Exploration music loaded")
 	else:
 		print("⚠ Failed to load explo.mp3")
+
+	_combat_stream = load("res://assets/music/combat.mp3")
+	if _combat_stream:
+		print("✓ Combat music loaded")
+	else:
+		print("⚠ Failed to load combat.mp3")
 
 func _on_menu_finished() -> void:
 	_menu_restart_timer.start(2.0)
@@ -89,7 +96,9 @@ func switch_to_combat() -> void:
 	_menu_player.stop()
 	_menu_restart_timer.stop()
 	_theme = "combat"
-	_player.stop()
+	if _combat_stream:
+		_player.stream = _combat_stream
+		_player.play()
 
 func switch_to_exploration() -> void:
 	if _theme == "exploration":
