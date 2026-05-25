@@ -6,6 +6,7 @@ var _theme: String = "exploration"
 var _menu_player: AudioStreamPlayer
 var _menu_restart_timer: Timer
 var _menu_stream: AudioStreamMP3
+var _explo_stream: AudioStreamMP3
 
 var _hirajoshi: Array[float] = [220.0, 233.08, 277.18, 311.13, 349.23, 440.0]
 var _hirajoshi_high: Array[float] = [440.0, 466.16, 554.37, 622.25, 698.46, 880.0]
@@ -33,6 +34,12 @@ func _ready() -> void:
 		print("✓ Menu music loaded")
 	else:
 		print("⚠ Failed to load menu.mp3")
+
+	_explo_stream = load("res://assets/music/explo.mp3")
+	if _explo_stream:
+		print("✓ Exploration music loaded")
+	else:
+		print("⚠ Failed to load explo.mp3")
 
 func _on_menu_finished() -> void:
 	_menu_restart_timer.start(2.0)
@@ -82,8 +89,7 @@ func switch_to_combat() -> void:
 	_menu_player.stop()
 	_menu_restart_timer.stop()
 	_theme = "combat"
-	_player.stream = _build_combat_loop()
-	_player.play()
+	_player.stop()
 
 func switch_to_exploration() -> void:
 	if _theme == "exploration":
@@ -91,13 +97,15 @@ func switch_to_exploration() -> void:
 	_menu_player.stop()
 	_menu_restart_timer.stop()
 	_theme = "exploration"
-	_player.stream = _build_exploration_loop()
-	_player.play()
+	if _explo_stream:
+		_player.stream = _explo_stream
+		_player.play()
 
 func _start_bgm() -> void:
 	_theme = "exploration"
-	_player.stream = _build_exploration_loop()
-	_player.play()
+	if _explo_stream:
+		_player.stream = _explo_stream
+		_player.play()
 
 func _flute_wave(phase: float, t: float) -> float:
 	var vibrato := sin(TAU * 5.0 * t) * 0.005
