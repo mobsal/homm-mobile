@@ -8,3 +8,7 @@ temp_data/
 *.bin
 mmarch.exe
 lodextract/
+
+# APK export
+*.apk
+*.idsig
