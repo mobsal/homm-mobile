@@ -2121,10 +2121,10 @@ func _input(event: InputEvent) -> void:
 			return
 		_touch_points[event.index] = event.position
 		if _touch_points.size() >= 2:
-			var positions := _touch_points.values()
-			var dist := positions[0].distance_to(positions[1])
+			var positions: Array = _touch_points.values()
+			var dist: float = (positions[0] as Vector2).distance_to(positions[1] as Vector2)
 			if _pinch_last_dist > 0:
-				var ratio := dist / _pinch_last_dist
+				var ratio: float = dist / _pinch_last_dist
 				if ratio > 1.02:
 					_zoom_in()
 					_pinch_last_dist = dist
