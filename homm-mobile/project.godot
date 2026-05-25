@@ -18,8 +18,11 @@ config/features=PackedStringArray("4.6")
 
 [autoload]
 
+FontLoader="*res://scripts/main.gd"
 GameData="*res://scripts/game_data.gd"
 RetroBGM="*res://scripts/retro_bgm.gd"
+SFX="*res://scripts/sfx_manager.gd"
+LoadingScreen="*res://scripts/loading_screen.gd"
 
 [display]
 

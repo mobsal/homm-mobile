@@ -6,47 +6,52 @@ signal combat_defeat()
 signal combat_fled()
 
 # ============================================
-# COMBAT MANAGER - Gestionnaire de combat
+# COMBAT MANAGER v2 — combat 1v1
 # ============================================
 
-# Références UI
 var _combat_panel: Panel
+var _combat_bg: TextureRect
+var _vfx: CombatVFX
 var _action_bar: HBoxContainer
-var _hero_container: HBoxContainer
-var _enemy_container: HBoxContainer
+var _hero_card: Panel
+var _enemy_card: Panel
+var _hero_hp_fill: ColorRect
+var _enemy_hp_fill: ColorRect
 var _hero_info_label: Label
 var _enemy_info_label: Label
 var _combat_log: RichTextLabel
 var _combat_title: Label
 var _round_label: Label
 var _turn_label: Label
-var _result_panel: Panel
-var _result_title: Label
-var _result_desc: RichTextLabel
-var _result_button: Button
-var _enemy_target_label: Label
 var _spell_panel: Panel
 var _spell_buttons: Array = []
 var _defense_indicator: Label
 var _rage_indicator: Label
 
-# Données de combat
-var _hero_units: Array = []
-var _enemy_units: Array = []
-var _current_turn: int = 0  # 0 = héros, 1 = ennemi
+var _hero_unit: Dictionary = {}
+var _enemy_unit: Dictionary = {}
+var _current_turn: int = 0
 var _round_count: int = 1
 var _in_combat: bool = false
-var _selected_target: int = -1
-var _hero_defending: bool = false  # Bonus de défense actif
-var _hero_attack_buff: bool = false  # Bonus d'attaque actif
+var _hero_defending: bool = false
+var _hero_attack_buff: bool = false
+var _hero_mana: int = 80
+var _hero_max_mana: int = 80
+var _mana_label: Label
 
-# Données du joueur
+const SPELL_COST: Dictionary = {
+	"fireball": 8,
+	"lightning": 7,
+	"heal": 5,
+	"rage": 4,
+	"ice_shard": 10,
+}
+
 var _hero_data: Dictionary = {}
 var _enemy_data: Dictionary = {}
 var _enemy_index: int = -1
-var _combat_outcome: String = ""  # victory, defeat, flee
+var _combat_outcome: String = ""
 
-# Styles enrichis
 var _top_bar_style: StyleBoxFlat
 var _action_btn_normal: StyleBoxFlat
 var _action_btn_hover: StyleBoxFlat
@@ -56,192 +61,202 @@ var _result_btn_normal: StyleBoxFlat
 var _result_btn_hover: StyleBoxFlat
 var _result_btn_pressed: StyleBoxFlat
 
-# Couleurs
-const COLOR_HERO := Color(0.12, 0.32, 0.55)
-const COLOR_ENEMY := Color(0.55, 0.12, 0.12)
-const COLOR_NEUTRAL := Color(0.35, 0.30, 0.25)
-const COLOR_GOLD := Color(0.85, 0.70, 0.20)
-const COLOR_RED := Color(0.75, 0.18, 0.12)
+const COLOR_BG_DARK := Color(0.04, 0.03, 0.06)
+const COLOR_PANEL_BG := Color(0.08, 0.06, 0.10, 0.92)
+const COLOR_GOLD := Color(0.92, 0.75, 0.18)
+const COLOR_GOLD_DIM := Color(0.55, 0.42, 0.18)
+const COLOR_CRIMSON := Color(0.75, 0.12, 0.14)
+const COLOR_TEAL := Color(0.12, 0.55, 0.62)
+const COLOR_HERO_BLUE := Color(0.08, 0.22, 0.42)
+const COLOR_ENEMY_RED := Color(0.42, 0.08, 0.08)
+const COLOR_TEXT_LIGHT := Color(0.92, 0.90, 0.86)
+const COLOR_TEXT_DIM := Color(0.60, 0.58, 0.52)
+const COLOR_MANA_PURPLE := Color(0.55, 0.30, 0.90)
 const COLOR_GREEN := Color(0.18, 0.65, 0.22)
+const COLOR_RED := Color(0.75, 0.18, 0.12)
+const COLOR_WHITE := Color(0.95, 0.95, 0.92)
 
 func _ready() -> void:
 	visible = false
-	_setup_ui()
 	_setup_styles()
+	_setup_ui()
+	_vfx = CombatVFX.new(self)
 
 func _setup_styles() -> void:
-	# Style barre supérieure
 	_top_bar_style = StyleBoxFlat.new()
-	_top_bar_style.bg_color = Color(0.08, 0.06, 0.04)
-	_top_bar_style.border_color = Color(0.45, 0.35, 0.20)
-	_top_bar_style.border_width_bottom = 3
-	_top_bar_style.corner_radius_bottom_left = 12
-	_top_bar_style.corner_radius_bottom_right = 12
-	_top_bar_style.shadow_color = Color(0, 0, 0, 0.50)
-	_top_bar_style.shadow_size = 8
+	_top_bar_style.bg_color = Color(0.06, 0.04, 0.08)
+	_top_bar_style.border_color = COLOR_GOLD_DIM
+	_top_bar_style.border_width_bottom = 2
+	_top_bar_style.corner_radius_bottom_left = 14
+	_top_bar_style.corner_radius_bottom_right = 14
+	_top_bar_style.shadow_color = Color(0, 0, 0, 0.60)
+	_top_bar_style.shadow_size = 10
 	_top_bar_style.shadow_offset = Vector2(0, 4)
 
-	# Style bouton action normal
+	var btn_base := Color(0.14, 0.10, 0.06)
+	var btn_border := Color(0.50, 0.38, 0.20)
+	var btn_hover_bg := Color(0.24, 0.18, 0.10)
+	var btn_hover_border := Color(0.72, 0.55, 0.28)
+
 	_action_btn_normal = StyleBoxFlat.new()
-	_action_btn_normal.bg_color = Color(0.18, 0.14, 0.10)
-	_action_btn_normal.border_color = Color(0.50, 0.40, 0.25)
-	_action_btn_normal.border_width_left = 2
-	_action_btn_normal.border_width_right = 2
-	_action_btn_normal.border_width_top = 2
-	_action_btn_normal.border_width_bottom = 4
-	_action_btn_normal.corner_radius_top_left = 10
-	_action_btn_normal.corner_radius_top_right = 10
-	_action_btn_normal.corner_radius_bottom_left = 10
-	_action_btn_normal.corner_radius_bottom_right = 10
-	_action_btn_normal.shadow_color = Color(0, 0, 0, 0.40)
-	_action_btn_normal.shadow_size = 6
+	_action_btn_normal.bg_color = btn_base
+	_action_btn_normal.border_color = btn_border
+	_action_btn_normal.border_width_left = 1
+	_action_btn_normal.border_width_right = 1
+	_action_btn_normal.border_width_top = 1
+	_action_btn_normal.border_width_bottom = 3
+	_action_btn_normal.corner_radius_top_left = 12
+	_action_btn_normal.corner_radius_top_right = 12
+	_action_btn_normal.corner_radius_bottom_left = 12
+	_action_btn_normal.corner_radius_bottom_right = 12
+	_action_btn_normal.shadow_color = Color(0, 0, 0, 0.50)
+	_action_btn_normal.shadow_size = 8
 	_action_btn_normal.shadow_offset = Vector2(0, 3)
 
-	# Style bouton action hover
 	_action_btn_hover = StyleBoxFlat.new()
-	_action_btn_hover.bg_color = Color(0.28, 0.22, 0.14)
-	_action_btn_hover.border_color = Color(0.70, 0.55, 0.30)
-	_action_btn_hover.border_width_left = 2
-	_action_btn_hover.border_width_right = 2
-	_action_btn_hover.border_width_top = 2
-	_action_btn_hover.border_width_bottom = 4
-	_action_btn_hover.corner_radius_top_left = 10
-	_action_btn_hover.corner_radius_top_right = 10
-	_action_btn_hover.corner_radius_bottom_left = 10
-	_action_btn_hover.corner_radius_bottom_right = 10
-	_action_btn_hover.shadow_color = Color(0, 0, 0, 0.50)
-	_action_btn_hover.shadow_size = 8
+	_action_btn_hover.bg_color = btn_hover_bg
+	_action_btn_hover.border_color = btn_hover_border
+	_action_btn_hover.border_width_left = 1
+	_action_btn_hover.border_width_right = 1
+	_action_btn_hover.border_width_top = 1
+	_action_btn_hover.border_width_bottom = 3
+	_action_btn_hover.corner_radius_top_left = 12
+	_action_btn_hover.corner_radius_top_right = 12
+	_action_btn_hover.corner_radius_bottom_left = 12
+	_action_btn_hover.corner_radius_bottom_right = 12
+	_action_btn_hover.shadow_color = Color(0, 0, 0, 0.60)
+	_action_btn_hover.shadow_size = 10
 	_action_btn_hover.shadow_offset = Vector2(0, 4)
 
-	# Style bouton action pressed
 	_action_btn_pressed = StyleBoxFlat.new()
-	_action_btn_pressed.bg_color = Color(0.12, 0.10, 0.06)
-	_action_btn_pressed.border_color = Color(0.40, 0.32, 0.18)
-	_action_btn_pressed.border_width_left = 2
-	_action_btn_pressed.border_width_right = 2
-	_action_btn_pressed.border_width_top = 4
-	_action_btn_pressed.border_width_bottom = 2
-	_action_btn_pressed.corner_radius_top_left = 10
-	_action_btn_pressed.corner_radius_top_right = 10
-	_action_btn_pressed.corner_radius_bottom_left = 10
-	_action_btn_pressed.corner_radius_bottom_right = 10
+	_action_btn_pressed.bg_color = Color(0.08, 0.06, 0.04)
+	_action_btn_pressed.border_color = Color(0.38, 0.28, 0.14)
+	_action_btn_pressed.border_width_left = 1
+	_action_btn_pressed.border_width_right = 1
+	_action_btn_pressed.border_width_top = 3
+	_action_btn_pressed.border_width_bottom = 1
+	_action_btn_pressed.corner_radius_top_left = 12
+	_action_btn_pressed.corner_radius_top_right = 12
+	_action_btn_pressed.corner_radius_bottom_left = 12
+	_action_btn_pressed.corner_radius_bottom_right = 12
 	_action_btn_pressed.shadow_color = Color(0, 0, 0, 0.20)
-	_action_btn_pressed.shadow_size = 3
+	_action_btn_pressed.shadow_size = 4
 	_action_btn_pressed.shadow_offset = Vector2(0, 1)
 
-	# Style panel résultat
 	_result_panel_style = StyleBoxFlat.new()
-	_result_panel_style.bg_color = Color(0.06, 0.05, 0.04, 0.95)
-	_result_panel_style.border_color = Color(0.55, 0.42, 0.22)
-	_result_panel_style.border_width_left = 3
-	_result_panel_style.border_width_right = 3
-	_result_panel_style.border_width_top = 3
-	_result_panel_style.border_width_bottom = 3
-	_result_panel_style.corner_radius_top_left = 20
-	_result_panel_style.corner_radius_top_right = 20
-	_result_panel_style.corner_radius_bottom_left = 20
-	_result_panel_style.corner_radius_bottom_right = 20
-	_result_panel_style.shadow_color = Color(0, 0, 0, 0.60)
-	_result_panel_style.shadow_size = 20
-	_result_panel_style.shadow_offset = Vector2(0, 8)
+	_result_panel_style.bg_color = Color(0.05, 0.04, 0.07, 0.96)
+	_result_panel_style.border_color = COLOR_GOLD_DIM
+	_result_panel_style.border_width_left = 2
+	_result_panel_style.border_width_right = 2
+	_result_panel_style.border_width_top = 2
+	_result_panel_style.border_width_bottom = 2
+	_result_panel_style.corner_radius_top_left = 24
+	_result_panel_style.corner_radius_top_right = 24
+	_result_panel_style.corner_radius_bottom_left = 24
+	_result_panel_style.corner_radius_bottom_right = 24
+	_result_panel_style.shadow_color = Color(0, 0, 0, 0.70)
+	_result_panel_style.shadow_size = 30
+	_result_panel_style.shadow_offset = Vector2(0, 12)
 
-	# Style bouton résultat normal
+	var result_btn_base := Color(0.18, 0.45, 0.18)
+	var result_btn_border := Color(0.30, 0.65, 0.30)
+
 	_result_btn_normal = StyleBoxFlat.new()
-	_result_btn_normal.bg_color = Color(0.18, 0.50, 0.20)
-	_result_btn_normal.border_color = Color(0.30, 0.70, 0.32)
-	_result_btn_normal.border_width_left = 2
-	_result_btn_normal.border_width_right = 2
-	_result_btn_normal.border_width_top = 2
-	_result_btn_normal.border_width_bottom = 4
-	_result_btn_normal.corner_radius_top_left = 12
-	_result_btn_normal.corner_radius_top_right = 12
-	_result_btn_normal.corner_radius_bottom_left = 12
-	_result_btn_normal.corner_radius_bottom_right = 12
-	_result_btn_normal.shadow_color = Color(0, 0, 0, 0.40)
-	_result_btn_normal.shadow_size = 6
+	_result_btn_normal.bg_color = Color(0.16, 0.40, 0.16)
+	_result_btn_normal.border_color = result_btn_border
+	_result_btn_normal.border_width_left = 1
+	_result_btn_normal.border_width_right = 1
+	_result_btn_normal.border_width_top = 1
+	_result_btn_normal.border_width_bottom = 3
+	_result_btn_normal.corner_radius_top_left = 14
+	_result_btn_normal.corner_radius_top_right = 14
+	_result_btn_normal.corner_radius_bottom_left = 14
+	_result_btn_normal.corner_radius_bottom_right = 14
+	_result_btn_normal.shadow_color = Color(0, 0, 0, 0.50)
+	_result_btn_normal.shadow_size = 8
 	_result_btn_normal.shadow_offset = Vector2(0, 3)
 
-	# Style bouton résultat hover
 	_result_btn_hover = StyleBoxFlat.new()
-	_result_btn_hover.bg_color = Color(0.25, 0.65, 0.28)
-	_result_btn_hover.border_color = Color(0.40, 0.85, 0.42)
-	_result_btn_hover.border_width_left = 2
-	_result_btn_hover.border_width_right = 2
-	_result_btn_hover.border_width_top = 2
-	_result_btn_hover.border_width_bottom = 4
-	_result_btn_hover.corner_radius_top_left = 12
-	_result_btn_hover.corner_radius_top_right = 12
-	_result_btn_hover.corner_radius_bottom_left = 12
-	_result_btn_hover.corner_radius_bottom_right = 12
-	_result_btn_hover.shadow_color = Color(0, 0, 0, 0.50)
-	_result_btn_hover.shadow_size = 8
+	_result_btn_hover.bg_color = Color(0.22, 0.55, 0.22)
+	_result_btn_hover.border_color = Color(0.35, 0.78, 0.35)
+	_result_btn_hover.border_width_left = 1
+	_result_btn_hover.border_width_right = 1
+	_result_btn_hover.border_width_top = 1
+	_result_btn_hover.border_width_bottom = 3
+	_result_btn_hover.corner_radius_top_left = 14
+	_result_btn_hover.corner_radius_top_right = 14
+	_result_btn_hover.corner_radius_bottom_left = 14
+	_result_btn_hover.corner_radius_bottom_right = 14
+	_result_btn_hover.shadow_color = Color(0, 0, 0, 0.60)
+	_result_btn_hover.shadow_size = 10
 	_result_btn_hover.shadow_offset = Vector2(0, 4)
 
-	# Style bouton résultat pressed
 	_result_btn_pressed = StyleBoxFlat.new()
-	_result_btn_pressed.bg_color = Color(0.12, 0.35, 0.14)
-	_result_btn_pressed.border_color = Color(0.25, 0.55, 0.28)
-	_result_btn_pressed.border_width_left = 2
-	_result_btn_pressed.border_width_right = 2
-	_result_btn_pressed.border_width_top = 2
-	_result_btn_pressed.border_width_bottom = 2
-	_result_btn_pressed.corner_radius_top_left = 12
-	_result_btn_pressed.corner_radius_top_right = 12
-	_result_btn_pressed.corner_radius_bottom_left = 12
-	_result_btn_pressed.corner_radius_bottom_right = 12
+	_result_btn_pressed.bg_color = Color(0.10, 0.30, 0.10)
+	_result_btn_pressed.border_color = Color(0.22, 0.50, 0.22)
+	_result_btn_pressed.border_width_left = 1
+	_result_btn_pressed.border_width_right = 1
+	_result_btn_pressed.border_width_top = 3
+	_result_btn_pressed.border_width_bottom = 1
+	_result_btn_pressed.corner_radius_top_left = 14
+	_result_btn_pressed.corner_radius_top_right = 14
+	_result_btn_pressed.corner_radius_bottom_left = 14
+	_result_btn_pressed.corner_radius_bottom_right = 14
 	_result_btn_pressed.shadow_color = Color(0, 0, 0, 0.20)
-	_result_btn_pressed.shadow_size = 3
+	_result_btn_pressed.shadow_size = 4
 	_result_btn_pressed.shadow_offset = Vector2(0, 1)
 
 func _setup_ui() -> void:
-	# Panel principal de combat
+	_combat_bg = TextureRect.new()
+	_combat_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_combat_bg.visible = false
+	_combat_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_combat_bg.texture = _generate_battlefield_bg()
+	_combat_bg.stretch_mode = TextureRect.STRETCH_SCALE
+	add_child(_combat_bg)
+
 	_combat_panel = Panel.new()
 	_combat_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_combat_panel.visible = false
 	add_child(_combat_panel)
 
-	# Style du panel principal
 	var panel_style = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.06, 0.05, 0.04, 0.92)
-	panel_style.border_color = Color(0.35, 0.28, 0.18)
-	panel_style.border_width_left = 4
-	panel_style.border_width_right = 4
-	panel_style.border_width_top = 4
-	panel_style.border_width_bottom = 4
-	panel_style.corner_radius_top_left = 16
-	panel_style.corner_radius_top_right = 16
-	panel_style.corner_radius_bottom_left = 16
-	panel_style.corner_radius_bottom_right = 16
-	panel_style.shadow_color = Color(0, 0, 0, 0.70)
-	panel_style.shadow_size = 24
-	panel_style.shadow_offset = Vector2(0, 10)
+	panel_style.bg_color = COLOR_PANEL_BG
+	panel_style.border_color = Color(0.30, 0.25, 0.16)
+	panel_style.border_width_left = 2
+	panel_style.border_width_right = 2
+	panel_style.border_width_top = 2
+	panel_style.border_width_bottom = 2
+	panel_style.corner_radius_top_left = 20
+	panel_style.corner_radius_top_right = 20
+	panel_style.corner_radius_bottom_left = 20
+	panel_style.corner_radius_bottom_right = 20
+	panel_style.shadow_color = Color(0, 0, 0, 0.80)
+	panel_style.shadow_size = 30
+	panel_style.shadow_offset = Vector2(0, 12)
 	_combat_panel.add_theme_stylebox_override("panel", panel_style)
 
-	# Barre supérieure avec style enrichi
 	var top_bar = Panel.new()
 	top_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	top_bar.custom_minimum_size = Vector2(0, 56)
 	top_bar.add_theme_stylebox_override("panel", _top_bar_style)
 	_combat_panel.add_child(top_bar)
 
-	# Titre du combat
 	_combat_title = Label.new()
-	_combat_title.text = "COMBAT"
+	_combat_title.text = "COMBAT 1v1"
 	_combat_title.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_combat_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_combat_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_combat_title.custom_minimum_size = Vector2(0, 56)
-	var title_font = _combat_title.get_theme_font("")
-	if title_font:
-		_combat_title.add_theme_font_size_override("font_size", 28)
+	_combat_title.add_theme_font_size_override("font_size", 30)
 	_combat_title.add_theme_color_override("font_color", COLOR_GOLD)
 	_combat_panel.add_child(_combat_title)
 
-	# Labels de round et tour
 	_round_label = Label.new()
 	_round_label.position = Vector2(20, 16)
 	_round_label.text = "Round 1"
-	_round_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	_round_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
+	_round_label.add_theme_font_size_override("font_size", 14)
 	_combat_panel.add_child(_round_label)
 
 	_turn_label = Label.new()
@@ -249,214 +264,316 @@ func _setup_ui() -> void:
 	_turn_label.position = Vector2(-20, 16)
 	_turn_label.text = "Votre tour"
 	_turn_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_turn_label.add_theme_color_override("font_color", Color(0.3, 0.7, 0.9))
+	_turn_label.add_theme_color_override("font_color", COLOR_TEAL)
+	_turn_label.add_theme_font_size_override("font_size", 14)
 	_combat_panel.add_child(_turn_label)
 
-	# Label cible ennemie
-	_enemy_target_label = Label.new()
-	_enemy_target_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_enemy_target_label.position = Vector2(0, 70)
-	_enemy_target_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_enemy_target_label.add_theme_color_override("font_color", Color(0.85, 0.3, 0.3))
-	_enemy_target_label.add_theme_font_size_override("font_size", 14)
-	_combat_panel.add_child(_enemy_target_label)
-
-	# Indicateur de défense
 	_defense_indicator = Label.new()
 	_defense_indicator.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_defense_indicator.position = Vector2(40, -80)
-	_defense_indicator.text = "🛡️ DÉFENSE ACTIVE"
-	_defense_indicator.add_theme_color_override("font_color", Color(0.3, 0.8, 0.9))
+	_defense_indicator.text = "🛡 DÉFENSE ACTIVE"
+	_defense_indicator.add_theme_color_override("font_color", COLOR_TEAL)
 	_defense_indicator.add_theme_font_size_override("font_size", 16)
 	_defense_indicator.visible = false
 	_combat_panel.add_child(_defense_indicator)
 
-	# Indicateur de rage
 	_rage_indicator = Label.new()
 	_rage_indicator.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_rage_indicator.position = Vector2(40, -60)
-	_rage_indicator.text = "⚔️ FUREUR ACTIVE"
-	_rage_indicator.add_theme_color_override("font_color", Color(0.95, 0.5, 0.1))
+	_rage_indicator.text = "⚔ FUREUR ACTIVE"
+	_rage_indicator.add_theme_color_override("font_color", Color(0.95, 0.55, 0.10))
 	_rage_indicator.add_theme_font_size_override("font_size", 16)
 	_rage_indicator.visible = false
 	_combat_panel.add_child(_rage_indicator)
 
-	# Conteneur héros (gauche)
-	_hero_container = HBoxContainer.new()
-	_hero_container.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_hero_container.position = Vector2(40, -180)
-	_hero_container.custom_minimum_size = Vector2(400, 140)
-	_hero_container.alignment = BoxContainer.ALIGNMENT_CENTER
-	_combat_panel.add_child(_hero_container)
+	_mana_label = Label.new()
+	_mana_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_mana_label.position = Vector2(40, -40)
+	_mana_label.add_theme_color_override("font_color", COLOR_MANA_PURPLE)
+	_mana_label.add_theme_font_size_override("font_size", 14)
+	_combat_panel.add_child(_mana_label)
 
-	# Conteneur ennemi (droite)
-	_enemy_container = HBoxContainer.new()
-	_enemy_container.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_enemy_container.position = Vector2(-440, -180)
-	_enemy_container.custom_minimum_size = Vector2(400, 140)
-	_enemy_container.alignment = BoxContainer.ALIGNMENT_CENTER
-	_combat_panel.add_child(_enemy_container)
-
-	# Infos héros
 	_hero_info_label = Label.new()
 	_hero_info_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_hero_info_label.position = Vector2(40, -40)
-	_hero_info_label.add_theme_color_override("font_color", Color(0.3, 0.7, 0.9))
+	_hero_info_label.position = Vector2(40, -24)
+	_hero_info_label.add_theme_color_override("font_color", Color(0.30, 0.65, 0.85))
+	_hero_info_label.add_theme_font_size_override("font_size", 12)
 	_combat_panel.add_child(_hero_info_label)
 
-	# Infos ennemi
 	_enemy_info_label = Label.new()
 	_enemy_info_label.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_enemy_info_label.position = Vector2(-200, -40)
+	_enemy_info_label.position = Vector2(-200, -24)
 	_enemy_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_enemy_info_label.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
+	_enemy_info_label.add_theme_color_override("font_color", Color(0.85, 0.25, 0.25))
+	_enemy_info_label.add_theme_font_size_override("font_size", 12)
 	_combat_panel.add_child(_enemy_info_label)
 
-	# Barre d'actions
 	_action_bar = HBoxContainer.new()
 	_action_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_action_bar.position = Vector2(-200, -60)
+	_action_bar.position = Vector2(-200, -80)
 	_action_bar.custom_minimum_size = Vector2(400, 50)
 	_action_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	_action_bar.add_theme_constant_override("separation", 20)
 	_combat_panel.add_child(_action_bar)
 
-	# Boutons d'action
 	_add_action_button("Attaquer", _on_attack_pressed, Color(0.75, 0.18, 0.12))
 	_add_action_button("Defendre", _on_defend_pressed, Color(0.18, 0.55, 0.65))
 	_add_action_button("Magie", _on_magic_pressed, Color(0.55, 0.18, 0.65))
 	_add_action_button("Fuir", _on_flee_pressed, Color(0.35, 0.30, 0.25))
 
-	# Log de combat
 	_combat_log = RichTextLabel.new()
-	_combat_log.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_combat_log.position = Vector2(40, 90)
-	_combat_log.size = Vector2(-80, 120)
-	_combat_log.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_combat_log.set_anchors_preset(Control.PRESET_TOP_WIDE, false)
+	_combat_log.position = Vector2(32, 90)
+	_combat_log.size = Vector2(-64, 100)
 	_combat_log.bbcode_enabled = true
-	_combat_log.add_theme_color_override("default_color", Color(0.8, 0.8, 0.8))
+	_combat_log.add_theme_color_override("default_color", COLOR_TEXT_DIM)
 	_combat_log.add_theme_font_size_override("normal_font_size", 12)
+	_combat_log.scroll_active = true
+	_combat_log.scroll_following = true
+	var log_style = StyleBoxFlat.new()
+	log_style.bg_color = Color(0.03, 0.02, 0.04, 0.50)
+	log_style.corner_radius_top_left = 8
+	log_style.corner_radius_top_right = 8
+	log_style.corner_radius_bottom_left = 8
+	log_style.corner_radius_bottom_right = 8
+	_combat_log.add_theme_stylebox_override("normal", log_style)
 	_combat_panel.add_child(_combat_log)
 
-	# Panel de résultat
-	_result_panel = Panel.new()
-	_result_panel.set_anchors_preset(Control.PRESET_CENTER)
-	_result_panel.custom_minimum_size = Vector2(400, 280)
-	_result_panel.visible = false
-	_result_panel.add_theme_stylebox_override("panel", _result_panel_style)
-	_combat_panel.add_child(_result_panel)
-
-	# Panel de sélection de sorts
 	_spell_panel = Panel.new()
 	_spell_panel.set_anchors_preset(Control.PRESET_CENTER)
-	_spell_panel.custom_minimum_size = Vector2(380, 200)
+	_spell_panel.custom_minimum_size = Vector2(420, 240)
 	_spell_panel.visible = false
 	var spell_style = StyleBoxFlat.new()
-	spell_style.bg_color = Color(0.08, 0.06, 0.04, 0.95)
+	spell_style.bg_color = Color(0.05, 0.03, 0.08, 0.97)
 	spell_style.border_color = Color(0.55, 0.18, 0.65)
-	spell_style.border_width_left = 3
-	spell_style.border_width_right = 3
-	spell_style.border_width_top = 3
-	spell_style.border_width_bottom = 3
-	spell_style.corner_radius_top_left = 12
-	spell_style.corner_radius_top_right = 12
-	spell_style.corner_radius_bottom_left = 12
-	spell_style.corner_radius_bottom_right = 12
+	spell_style.border_width_left = 2
+	spell_style.border_width_right = 2
+	spell_style.border_width_top = 2
+	spell_style.border_width_bottom = 2
+	spell_style.corner_radius_top_left = 20
+	spell_style.corner_radius_top_right = 20
+	spell_style.corner_radius_bottom_left = 20
+	spell_style.corner_radius_bottom_right = 20
+	spell_style.shadow_color = Color(0, 0, 0, 0.70)
+	spell_style.shadow_size = 24
+	spell_style.shadow_offset = Vector2(0, 10)
 	_spell_panel.add_theme_stylebox_override("panel", spell_style)
 	_combat_panel.add_child(_spell_panel)
 
-	# Titre panel sorts
 	var spell_title = Label.new()
 	spell_title.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	spell_title.position = Vector2(0, 15)
 	spell_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	spell_title.text = "Choisir un sort"
-	spell_title.add_theme_font_size_override("font_size", 20)
-	spell_title.add_theme_color_override("font_color", Color(0.85, 0.5, 0.95))
+	spell_title.add_theme_font_size_override("font_size", 22)
+	spell_title.add_theme_color_override("font_color", Color(0.75, 0.45, 0.95))
 	_spell_panel.add_child(spell_title)
 
-	# Boutons de sorts
 	var spell_container = HBoxContainer.new()
 	spell_container.set_anchors_preset(Control.PRESET_CENTER)
-	spell_container.position = Vector2(-150, 50)
-	spell_container.custom_minimum_size = Vector2(300, 100)
+	spell_container.position = Vector2(-160, 55)
+	spell_container.custom_minimum_size = Vector2(320, 120)
 	spell_container.alignment = BoxContainer.ALIGNMENT_CENTER
-	spell_container.add_theme_constant_override("separation", 15)
+	spell_container.add_theme_constant_override("separation", 12)
 	_spell_panel.add_child(spell_container)
 
 	_add_spell_button("Boule de Feu", Color(0.95, 0.35, 0.15), "fireball", spell_container)
 	_add_spell_button("Éclair", Color(0.65, 0.75, 0.95), "lightning", spell_container)
 	_add_spell_button("Soin", Color(0.25, 0.75, 0.35), "heal", spell_container)
 	_add_spell_button("Fureur", Color(0.95, 0.65, 0.15), "rage", spell_container)
-
-	# Titre résultat
-	_result_title = Label.new()
-	_result_title.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_result_title.position = Vector2(0, 30)
-	_result_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_result_title.add_theme_font_size_override("font_size", 32)
-	_result_panel.add_child(_result_title)
-
-	# Description résultat
-	_result_desc = RichTextLabel.new()
-	_result_desc.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_result_desc.position = Vector2(30, 90)
-	_result_desc.size = Vector2(-60, 100)
-	_result_desc.bbcode_enabled = true
-	_result_desc.add_theme_color_override("default_color", Color(0.8, 0.8, 0.8))
-	_result_desc.add_theme_font_size_override("normal_font_size", 14)
-	_result_panel.add_child(_result_desc)
-
-	# Bouton résultat
-	_result_button = Button.new()
-	_result_button.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_result_button.position = Vector2(60, -70)
-	_result_button.size = Vector2(-120, 0)
-	_result_button.custom_minimum_size = Vector2(0, 48)
-	_result_button.text = "Continuer"
-	_result_button.add_theme_font_size_override("font_size", 18)
-	_result_button.add_theme_color_override("font_color", Color(0.9, 0.95, 0.9))
-	_result_button.add_theme_stylebox_override("normal", _result_btn_normal)
-	_result_button.add_theme_stylebox_override("hover", _result_btn_hover)
-	_result_button.add_theme_stylebox_override("pressed", _result_btn_pressed)
-	_result_button.pressed.connect(_on_result_button_pressed)
-	_result_panel.add_child(_result_button)
+	_add_spell_button("Glace", Color(0.5, 0.7, 1.0), "ice_shard", spell_container)
 
 func _add_action_button(text: String, callback: Callable, accent_color: Color) -> void:
+	var action_icons := {
+		"Attaquer": "",
+		"Defendre": "",
+		"Magie": "",
+		"Fuir": "",
+	}
 	var btn = Button.new()
-	btn.text = text
-	btn.custom_minimum_size = Vector2(100, 44)
-	btn.add_theme_font_size_override("font_size", 14)
-	btn.add_theme_color_override("font_color", Color(0.9, 0.9, 0.85))
-	btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 0.9))
-	btn.add_theme_color_override("font_pressed_color", Color(0.8, 0.8, 0.75))
+	btn.text = action_icons.get(text, "") + text
+	btn.custom_minimum_size = Vector2(120, 54)
+	btn.add_theme_font_size_override("font_size", 16)
+	btn.add_theme_color_override("font_color", COLOR_TEXT_LIGHT)
+	btn.add_theme_color_override("font_hover_color", COLOR_WHITE)
+	btn.add_theme_color_override("font_pressed_color", Color(0.75, 0.72, 0.68))
 	btn.add_theme_stylebox_override("normal", _action_btn_normal)
 	btn.add_theme_stylebox_override("hover", _action_btn_hover)
 	btn.add_theme_stylebox_override("pressed", _action_btn_pressed)
 	btn.pressed.connect(callback)
+	btn.mouse_entered.connect(func():
+		var ht = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+		ht.tween_property(btn, "scale", Vector2(1.06, 1.06), 0.15)
+		ht.parallel().tween_property(btn, "modulate", Color(1.10, 1.06, 1.02), 0.15)
+	)
+	btn.mouse_exited.connect(func():
+		var ht = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		ht.tween_property(btn, "scale", Vector2(1.0, 1.0), 0.1)
+		ht.parallel().tween_property(btn, "modulate", Color.WHITE, 0.1)
+	)
 	_action_bar.add_child(btn)
 
 func _add_spell_button(text: String, accent_color: Color, spell_type: String, container: HBoxContainer) -> void:
 	var btn = Button.new()
-	btn.text = text
-	btn.custom_minimum_size = Vector2(70, 80)
+	var cost: int = SPELL_COST.get(spell_type, 0)
+	btn.text = text + "\n[" + str(cost) + " PM]"
+	btn.custom_minimum_size = Vector2(82, 100)
 	btn.add_theme_font_size_override("font_size", 11)
-	btn.add_theme_color_override("font_color", Color(0.9, 0.9, 0.85))
+	btn.add_theme_color_override("font_color", COLOR_TEXT_LIGHT)
 	var spell_normal = StyleBoxFlat.new()
-	spell_normal.bg_color = accent_color.darkened(0.4)
-	spell_normal.border_color = accent_color
-	spell_normal.border_width_left = 2
-	spell_normal.border_width_right = 2
-	spell_normal.border_width_top = 2
-	spell_normal.border_width_bottom = 2
-	spell_normal.corner_radius_top_left = 8
-	spell_normal.corner_radius_top_right = 8
-	spell_normal.corner_radius_bottom_left = 8
-	spell_normal.corner_radius_bottom_right = 8
+	spell_normal.bg_color = accent_color.darkened(0.50)
+	spell_normal.border_color = accent_color.lightened(0.15)
+	spell_normal.border_width_left = 1
+	spell_normal.border_width_right = 1
+	spell_normal.border_width_top = 1
+	spell_normal.border_width_bottom = 3
+	spell_normal.corner_radius_top_left = 12
+	spell_normal.corner_radius_top_right = 12
+	spell_normal.corner_radius_bottom_left = 12
+	spell_normal.corner_radius_bottom_right = 12
+	spell_normal.shadow_color = Color(0, 0, 0, 0.50)
+	spell_normal.shadow_size = 6
+	spell_normal.shadow_offset = Vector2(0, 3)
 	btn.add_theme_stylebox_override("normal", spell_normal)
+	btn.mouse_entered.connect(func():
+		btn.scale = Vector2(1.0, 1.0)
+		var ht = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+		ht.tween_property(btn, "scale", Vector2(1.08, 1.08), 0.12)
+	)
+	btn.mouse_exited.connect(func():
+		btn.scale = Vector2(1.08, 1.08)
+		var ht = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		ht.tween_property(btn, "scale", Vector2(1.0, 1.0), 0.08)
+	)
 	btn.pressed.connect(func(): _on_spell_selected(spell_type))
 	container.add_child(btn)
 	_spell_buttons.append(btn)
+
+# ============================================
+# BATTLEFIELD BACKGROUND (identique)
+# ============================================
+
+func _generate_battlefield_bg() -> ImageTexture:
+	var w: int = 270
+	var h: int = 600
+	var img: Image = Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var sky_h: int = int(h * 0.55)
+	var half_w: float = float(w) * 0.5
+	var half_h: float = float(h) * 0.5
+	var half_w_int: int = w / 2
+
+	for y in range(sky_h):
+		var t: float = float(y) / sky_h
+		var r: float = 0.55 - t * 0.30
+		var g: float = 0.28 + t * 0.25
+		var b: float = 0.15 + t * 0.55
+		img.set_pixel(half_w_int, y, Color(r, g, b))
+		var edge_falloff: float = 1.0
+		for x in range(half_w_int):
+			edge_falloff = 1.0 - pow((half_w_int - x) / half_w, 1.5) * 0.25
+			img.set_pixel(x, y, Color(r * edge_falloff, g * edge_falloff, b * edge_falloff))
+		for x in range(half_w_int, w):
+			edge_falloff = 1.0 - pow((x - half_w_int) / half_w, 1.5) * 0.25
+			img.set_pixel(x, y, Color(r * edge_falloff, g * edge_falloff, b * edge_falloff))
+
+	for x in range(w):
+		for y in range(sky_h - 15, sky_h + 10):
+			var mist_t: float = float(y - (sky_h - 15)) / 25.0
+			mist_t = clamp(mist_t, 0, 1)
+			var mist_strength: float = 0.15 * (1.0 - abs(mist_t - 0.5) * 2.0)
+			var px := img.get_pixel(x, y)
+			img.set_pixel(x, y, Color(
+				lerp(px.r, 0.70, mist_strength),
+				lerp(px.g, 0.50, mist_strength),
+				lerp(px.b, 0.30, mist_strength)
+			))
+
+	for y in range(sky_h, h):
+		var gy: float = float(y - sky_h) / (h - sky_h)
+		var grass_r_base: float = 0.15 + gy * 0.10
+		var grass_g_base: float = 0.30 + gy * 0.12
+		var grass_b_base: float = 0.08 + gy * 0.04
+		var sunset_tint: float = maxf(0, 1.0 - gy * 2.0) * 0.10
+		for x in range(w):
+			var gx_noise: float = sin(x * 0.05 + y * 0.08) * 0.03
+			img.set_pixel(x, y, Color(
+				grass_r_base + gx_noise + sunset_tint * 0.10,
+				grass_g_base + gx_noise + sunset_tint * 0.05,
+				grass_b_base - sunset_tint * 0.02
+			))
+
+	var sun_cx: int = half_w_int
+	var sun_cy: int = sky_h - 40
+	var sun_r: int = 12
+	for dy in range(-sun_r, sun_r + 1):
+		for dx in range(-sun_r, sun_r + 1):
+			var dist: float = sqrt(dx * dx + dy * dy)
+			if dist <= sun_r:
+				var sx: int = sun_cx + dx
+				var sy: int = sun_cy + dy
+				if sx >= 0 and sx < w and sy >= 0 and sy < h:
+					var alpha: float = 1.0
+					if dist > sun_r * 0.6:
+						alpha = 1.0 - (dist - sun_r * 0.6) / (sun_r * 0.4)
+					var sun_bright: float = maxf(0, 1.0 - dist / sun_r)
+					img.set_pixel(sx, sy, Color(1.0, 0.85 + sun_bright * 0.15, 0.45 + sun_bright * 0.35, alpha))
+
+	var halo_r: int = 40
+	for dy in range(-halo_r, halo_r + 1):
+		for dx in range(-halo_r, halo_r + 1):
+			var dist: float = sqrt(dx * dx + dy * dy)
+			if dist <= halo_r and dist > sun_r:
+				var hx: int = sun_cx + dx
+				var hy: int = sun_cy + dy
+				if hx >= 0 and hx < w and hy >= 0 and hy < h:
+					var glow: float = maxf(0, 1.0 - (dist - sun_r) / (halo_r - sun_r))
+					glow *= glow * 0.12
+					var px := img.get_pixel(hx, hy)
+					img.set_pixel(hx, hy, Color(
+						lerp(px.r, 1.0, glow),
+						lerp(px.g, 0.90, glow),
+						lerp(px.b, 0.55, glow)
+					))
+
+	var mountain_layers: Array = [
+		{ "horizon_offset": 0, "colors": [Color(0.05, 0.04, 0.08), Color(0.04, 0.03, 0.07), Color(0.06, 0.05, 0.09)], "peaks": [0, 0.08, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 1.0], "heights": [0, -40, -25, -60, -35, -70, -45, -65, -30, -50, 0] },
+		{ "horizon_offset": -3, "colors": [Color(0.08, 0.06, 0.10), Color(0.07, 0.05, 0.09), Color(0.09, 0.07, 0.11)], "peaks": [0, 0.10, 0.22, 0.32, 0.42, 0.52, 0.62, 0.72, 0.82, 0.92, 1.0], "heights": [-5, -50, -30, -70, -45, -80, -55, -75, -40, -55, -10] },
+	]
+	for layer in mountain_layers:
+		var base_y: int = sky_h + layer["horizon_offset"]
+		var pts: Array = []
+		var peaks_arr: Array = layer["peaks"]
+		var heights_arr: Array = layer["heights"]
+		for i in range(peaks_arr.size()):
+			var px_x: int = int(w * peaks_arr[i])
+			var px_y: int = base_y + heights_arr[i]
+			pts.append([px_x, px_y])
+		for i in range(pts.size() - 1):
+			var x1: int = pts[i][0]
+			var y1: int = pts[i][1]
+			var x2: int = pts[i + 1][0]
+			var y2: int = pts[i + 1][1]
+			var col: Color = layer["colors"][i % layer["colors"].size()]
+			var y_start: int = mini(y1, y2)
+			var y_end: int = base_y + 5
+			for my in range(y_start, y_end):
+				var t_seg: float = float(my - y_start) / float(y_end - y_start) if y_end > y_start else 0
+				var left_x: int = int(x1 + (x2 - x1) * float(my - y1) / float(y2 - y1)) if y2 != y1 else x1
+				for mx in range(left_x - 2, left_x + 3):
+					if mx >= 0 and mx < w:
+						var existing := img.get_pixel(mx, my)
+						if existing.a < 0.1:
+							var fade: float = 1.0 - t_seg * 0.25
+							img.set_pixel(mx, my, Color(col.r * fade, col.g * fade, col.b * fade, 1.0))
+
+	for y in range(h):
+		var vig_y: float = pow((float(y) - half_h) / half_h, 2) * 0.10
+		for x in range(w):
+			var vig: float = 1.0 - pow((float(x) - half_w) / half_w, 2) * 0.15 - vig_y
+			var px := img.get_pixel(x, y)
+			img.set_pixel(x, y, Color(px.r * vig, px.g * vig, px.b * vig))
+
+	return ImageTexture.create_from_image(img)
 
 # ============================================
 # COMBAT LOGIC
@@ -465,109 +582,298 @@ func _add_spell_button(text: String, accent_color: Color, spell_type: String, co
 func start_combat(hero_data: Dictionary, enemy_data: Dictionary, enemy_index: int = -1) -> void:
 	_hero_data = hero_data
 	_enemy_data = enemy_data
+	if RetroBGM and RetroBGM.has_method("switch_to_combat"):
+		RetroBGM.switch_to_combat()
 	_enemy_index = enemy_index
-	_hero_units = hero_data.get("units", []).duplicate(true)
-	_enemy_units = enemy_data.get("units", []).duplicate(true)
+
+	var raw_hero_units: Array = hero_data.get("units", [])
+	_hero_unit = raw_hero_units[0].duplicate(true) if raw_hero_units.size() > 0 else {
+		"name": "Heros", "hp": 80, "max_hp": 80, "attack": 15, "defense": 8, "magic": 10
+	}
+	var raw_enemy_units: Array = enemy_data.get("units", [])
+	_enemy_unit = raw_enemy_units[0].duplicate(true) if raw_enemy_units.size() > 0 else {
+		"name": "Ennemi", "hp": 50, "max_hp": 50, "attack": 10, "defense": 5
+	}
+
 	_current_turn = 0
 	_round_count = 1
 	_in_combat = true
 	_combat_outcome = ""
-	_selected_target = -1
-	_hero_defending = false  # Reset defense bonus
-	_hero_attack_buff = false  # Reset attack bonus
+	_hero_defending = false
+	_hero_attack_buff = false
+	_hero_mana = _hero_max_mana
 
 	_combat_title.text = "COMBAT"
 	_round_label.text = "Round 1"
 	_turn_label.text = "Votre tour"
 	_combat_log.clear()
-	_result_panel.visible = false
 	_action_bar.visible = true
 	_defense_indicator.visible = false
 	_rage_indicator.visible = false
-	if _result_button:
-		_result_button.text = "Continuer"
 
 	_update_unit_displays()
-	_log_message("[color=#6ec3e0]Le combat commence![/color]")
-	_log_message("Vous affrontez " + enemy_data.get("name", "l'ennemi"))
+	_update_mana_display()
+	_log_message("[color=#6ec3e0]Combat 1v1: " + _hero_unit.get("name", "Heros") + " vs " + _enemy_unit.get("name", "Ennemi") + "![/color]")
+	if SFX and SFX.has_method("play_combat_start"):
+		SFX.play_combat_start()
 
 	visible = true
+	_combat_bg.visible = true
+	_combat_bg.modulate.a = 0.0
 	_combat_panel.visible = true
 	_combat_panel.modulate.a = 0.0
 	_combat_panel.scale = Vector2(0.9, 0.9)
 
 	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
-	tween.tween_property(_combat_panel, "modulate:a", 1.0, 0.4)
+	tween.tween_property(_combat_bg, "modulate:a", 1.0, 0.6)
+	tween.parallel().tween_property(_combat_panel, "modulate:a", 1.0, 0.4)
 	tween.parallel().tween_property(_combat_panel, "scale", Vector2(1.0, 1.0), 0.4)
+	tween.tween_callback(func():
+		_show_turn_banner("COMBAT!", COLOR_GOLD)
+	)
 
 func get_hero_units() -> Array:
-	return _hero_units.duplicate(true)
+	return [_hero_unit.duplicate(true)]
 
 func _end_combat(won: bool) -> void:
 	_in_combat = false
 	_combat_outcome = "victory" if won else "defeat"
 	_action_bar.visible = false
 
-	if not won:
-		visible = false
-		_combat_panel.visible = false
-		_result_panel.visible = false
-		combat_defeat.emit()
-		combat_ended.emit(false)
-		return
-
 	var tween = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
 	tween.tween_property(_combat_panel, "modulate:a", 0.0, 0.5)
 	tween.parallel().tween_property(_combat_panel, "scale", Vector2(0.9, 0.9), 0.5)
 	tween.tween_callback(func():
-		_result_panel.visible = true
-		_result_panel.modulate.a = 0.0
-		_result_panel.scale = Vector2(0.8, 0.8)
-		_result_title.text = "VICTOIRE!"
-		_result_title.add_theme_color_override("font_color", COLOR_GREEN)
-		_result_desc.text = "[center]Vous avez vaincu " + _enemy_data.get("name", "l'ennemi") + "![/center]\n\n"
-		var xp_show: int = int(_enemy_data.get("xp", 50)) + 50
-		_result_desc.text += "[color=#d4a017]Experience gagnee:[/color] " + str(xp_show) + "\n"
-		_result_desc.text += "[color=#d4a017]Or gagne:[/color] " + str(_enemy_data.get("gold", 50))
-		var result_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
-		result_tween.tween_property(_result_panel, "modulate:a", 1.0, 0.5)
-		result_tween.parallel().tween_property(_result_panel, "scale", Vector2(1.0, 1.0), 0.5)
+		_spawn_result_panel(_combat_outcome)
 	)
 
 func _show_flee_result() -> void:
 	_in_combat = false
 	_combat_outcome = "flee"
 	_action_bar.visible = false
-	_result_panel.visible = true
-	_result_panel.modulate.a = 1.0
-	_result_panel.scale = Vector2(1.0, 1.0)
-	_result_title.text = "FUITE!"
-	_result_title.add_theme_color_override("font_color", Color(0.5, 0.7, 0.9))
-	_result_desc.text = "[center]Vous avez reussi a fuir le combat.[/center]"
+	_spawn_result_panel("flee")
 
-func _on_result_button_pressed() -> void:
-	var outcome: String = _combat_outcome
-	_combat_outcome = ""
-	var tween = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
-	tween.tween_property(_combat_panel, "modulate:a", 0.0, 0.4)
-	tween.tween_callback(func():
-		visible = false
-		_combat_panel.visible = false
-		_result_panel.visible = false
-		match outcome:
-			"victory":
-				combat_victory.emit(int(_enemy_data.get("gold", 50)), int(_enemy_data.get("xp", 100)))
-				combat_ended.emit(true)
-			"flee":
-				combat_fled.emit()
-				combat_ended.emit(false)
-			_:
-				combat_ended.emit(false)
+func _spawn_result_panel(outcome: String) -> void:
+	# Dim overlay with radial gradient (vignette)
+	var grad := Gradient.new()
+	grad.add_point(0.0, Color(0.05, 0.03, 0.02, 0.95))
+	grad.add_point(0.5, Color(0.03, 0.02, 0.01, 0.98))
+	grad.add_point(1.0, Color(0.01, 0.01, 0.00, 1.00))
+
+	var grad_tex := GradientTexture2D.new()
+	grad_tex.gradient = grad
+	grad_tex.fill = GradientTexture2D.FILL_RADIAL
+	grad_tex.fill_from = Vector2(0.5, 0.5)
+	grad_tex.fill_to = Vector2(1.0, 1.0)
+	grad_tex.width = 540
+	grad_tex.height = 1200
+
+	var dim := TextureRect.new()
+	dim.texture = grad_tex
+	dim.stretch_mode = TextureRect.STRETCH_SCALE
+	dim.anchor_left = 0
+	dim.anchor_top = 0
+	dim.anchor_right = 1
+	dim.anchor_bottom = 1
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.modulate.a = 0.0
+	add_child(dim)
+
+	# Panel (centered, 520x400)
+	var panel := Panel.new()
+	panel.anchor_left = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -260
+	panel.offset_top = -200
+	panel.offset_right = 260
+	panel.offset_bottom = 200
+	panel.add_theme_stylebox_override("panel", _result_panel_style)
+	panel.modulate.a = 0.0
+	panel.scale = Vector2(0.8, 0.8)
+	add_child(panel)
+
+	# Decorative top bar (full panel width, 80px tall)
+	var deco := ColorRect.new()
+	deco.anchor_left = 0
+	deco.anchor_top = 0
+	deco.anchor_right = 1
+	deco.anchor_bottom = 0
+	deco.offset_left = 0
+	deco.offset_top = 0
+	deco.offset_right = 0
+	deco.offset_bottom = 80
+	deco.color = Color(0.18, 0.05, 0.04, 0.92)
+	deco.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(deco)
+
+	# Gold accent line
+	var accent := ColorRect.new()
+	accent.anchor_left = 0
+	accent.anchor_top = 0
+	accent.anchor_right = 1
+	accent.anchor_bottom = 0
+	accent.offset_left = 0
+	accent.offset_top = 77
+	accent.offset_right = 0
+	accent.offset_bottom = 80
+	accent.color = COLOR_GOLD
+	accent.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(accent)
+
+	# Title (full width, vertically centered in top bar)
+	var title := Label.new()
+	title.anchor_left = 0
+	title.anchor_top = 0
+	title.anchor_right = 1
+	title.anchor_bottom = 0
+	title.offset_left = 20
+	title.offset_top = 5
+	title.offset_right = -20
+	title.offset_bottom = 75
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.60))
+	panel.add_child(title)
+
+	# Description (indented, below top bar)
+	var desc := RichTextLabel.new()
+	desc.anchor_left = 0
+	desc.anchor_top = 0
+	desc.anchor_right = 1
+	desc.anchor_bottom = 0
+	desc.offset_left = 30
+	desc.offset_top = 95
+	desc.offset_right = -30
+	desc.offset_bottom = 180
+	desc.bbcode_enabled = true
+	desc.scroll_active = false
+	desc.fit_content = true
+	desc.add_theme_color_override("default_color", Color(0.85, 0.82, 0.78))
+	desc.add_theme_font_size_override("normal_font_size", 15)
+	panel.add_child(desc)
+
+	# Separator line
+	var sep := ColorRect.new()
+	sep.anchor_left = 0
+	sep.anchor_top = 0
+	sep.anchor_right = 1
+	sep.anchor_bottom = 0
+	sep.offset_left = 70
+	sep.offset_top = 185
+	sep.offset_right = -70
+	sep.offset_bottom = 186
+	sep.color = Color(0.50, 0.38, 0.20, 0.40)
+	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(sep)
+
+	# Rewards label
+	var reward := RichTextLabel.new()
+	reward.anchor_left = 0
+	reward.anchor_top = 0
+	reward.anchor_right = 1
+	reward.anchor_bottom = 0
+	reward.offset_left = 30
+	reward.offset_top = 195
+	reward.offset_right = -30
+	reward.offset_bottom = 260
+	reward.bbcode_enabled = true
+	reward.scroll_active = false
+	reward.fit_content = true
+	reward.add_theme_color_override("default_color", Color(0.85, 0.82, 0.78))
+	reward.add_theme_font_size_override("normal_font_size", 16)
+	reward.visible = false
+	panel.add_child(reward)
+
+	# Continue button (centered horizontally at bottom)
+	var btn := Button.new()
+	btn.anchor_left = 0.5
+	btn.anchor_top = 0
+	btn.anchor_right = 0.5
+	btn.anchor_bottom = 0
+	btn.offset_left = -100
+	btn.offset_top = 275
+	btn.offset_right = 100
+	btn.offset_bottom = 335
+	btn.text = "Continuer"
+	btn.add_theme_font_size_override("font_size", 18)
+	btn.add_theme_color_override("font_color", Color(0.95, 0.95, 0.90))
+	btn.add_theme_stylebox_override("normal", _result_btn_normal)
+	btn.add_theme_stylebox_override("hover", _result_btn_hover)
+	btn.add_theme_stylebox_override("pressed", _result_btn_pressed)
+	panel.add_child(btn)
+
+	# Content based on outcome
+	match outcome:
+		"victory":
+			title.text = "VICTOIRE !"
+			title.add_theme_color_override("font_color", COLOR_GOLD)
+			var enemy_name = _enemy_data.get("name", "l'ennemi")
+			desc.text = "[center]Vous avez vaincu\n[color=#ff6666]" + enemy_name + "[/color] ![/center]"
+			var xp_val: int = int(_enemy_data.get("xp", 50)) + 50
+			var gold_val: int = _enemy_data.get("gold", 50)
+			reward.visible = true
+			reward.text = "[center][color=#d4a017]Or :  " + str(gold_val) + "     [/color][color=#88ccff]XP :  " + str(xp_val) + "[/color][/center]"
+			if SFX and SFX.has_method("play_victory"):
+				SFX.play_victory()
+		"defeat":
+			title.text = "DÉFAITE..."
+			title.add_theme_color_override("font_color", COLOR_CRIMSON)
+			var enemy_name = _enemy_data.get("name", "l'ennemi")
+			desc.text = "[center]Vous avez été vaincu par\n[color=#ff6666]" + enemy_name + "[/color]...[/center]\n\n[center][color=#666666]Votre héros a péri au combat.[/color][/center]"
+			if SFX and SFX.has_method("play_defeat"):
+				SFX.play_defeat()
+		"flee":
+			title.text = "FUITE"
+			title.add_theme_color_override("font_color", COLOR_TEAL)
+			desc.text = "[center]Vous avez réussi à\nfuir le combat.[/center]"
+
+	# Entrance animation
+	var anim = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	anim.tween_property(dim, "modulate:a", 1.0, 0.3)
+	anim.parallel().tween_property(panel, "modulate:a", 1.0, 0.4)
+	anim.parallel().tween_property(panel, "scale", Vector2(1.0, 1.0), 0.4)
+	anim.tween_callback(func():
+		if RetroBGM and RetroBGM.has_method("switch_to_exploration"):
+			RetroBGM.switch_to_exploration()
+	)
+
+	btn.pressed.connect(func():
+		btn.disabled = true
+		var hide = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+		hide.tween_property(panel, "modulate:a", 0.0, 0.2)
+		hide.parallel().tween_property(dim, "modulate:a", 0.0, 0.2)
+		hide.parallel().tween_property(panel, "scale", Vector2(0.9, 0.9), 0.2)
+		hide.tween_callback(func():
+			if is_instance_valid(dim):
+				dim.queue_free()
+			if is_instance_valid(panel):
+				panel.queue_free()
+			visible = false
+			_combat_bg.visible = false
+			_combat_panel.visible = false
+			match outcome:
+				"victory":
+					combat_victory.emit(int(_enemy_data.get("gold", 50)), int(_enemy_data.get("xp", 100)))
+					combat_ended.emit(true)
+				"flee":
+					combat_fled.emit()
+					combat_ended.emit(false)
+				"defeat":
+					combat_defeat.emit()
+					combat_ended.emit(false)
+				_:
+					combat_ended.emit(false)
+		)
 	)
 
 func _on_attack_pressed() -> void:
 	if not _in_combat or _current_turn != 0:
 		return
+	if SFX and SFX.has_method("play_sword_hit"):
+		SFX.play_sword_hit()
 	_process_hero_attack()
 
 func _on_defend_pressed() -> void:
@@ -576,6 +882,8 @@ func _on_defend_pressed() -> void:
 	_hero_defending = true
 	_defense_indicator.visible = true
 	_log_message("[color=#5a9eb8]Vous prenez une position defensive. (+50% defense)[/color]")
+	if SFX and SFX.has_method("play_click"):
+		SFX.play_click()
 	_process_next_turn()
 
 func _on_magic_pressed() -> void:
@@ -590,7 +898,27 @@ func _on_magic_pressed() -> void:
 
 func _on_spell_selected(spell_type: String) -> void:
 	_spell_panel.visible = false
+	if not _can_cast(spell_type):
+		_spell_panel.visible = true
+		return
+	_spend_mana(spell_type)
 	_cast_spell(spell_type)
+
+func _can_cast(spell_type: String) -> bool:
+	var cost: int = SPELL_COST.get(spell_type, 0)
+	if _hero_mana < cost:
+		_log_message("[color=#ff4444]Pas assez de mana! (besoin: " + str(cost) + ")[/color]")
+		return false
+	return true
+
+func _spend_mana(spell_type: String) -> void:
+	var cost: int = SPELL_COST.get(spell_type, 0)
+	_hero_mana = maxi(0, _hero_mana - cost)
+	_update_mana_display()
+
+func _update_mana_display() -> void:
+	if _mana_label:
+		_mana_label.text = "Mana: %d/%d" % [_hero_mana, _hero_max_mana]
 
 func _cast_spell(spell_type: String) -> void:
 	match spell_type:
@@ -602,105 +930,71 @@ func _cast_spell(spell_type: String) -> void:
 			_cast_heal()
 		"rage":
 			_cast_rage()
+		"ice_shard":
+			_cast_ice_shard()
 
 func _cast_fireball() -> void:
-	if _enemy_units.is_empty():
+	if _enemy_unit.get("hp", 0) <= 0:
 		_end_combat(true)
 		return
-	
-	var attacker = _hero_units[0] if not _hero_units.is_empty() else {"magic": 15, "name": "Heros"}
-	var base_damage = attacker.get("magic", 15)
-	
+
+	var base_damage = _hero_unit.get("magic", 15)
 	_log_message("[color=#ff5522]Vous lancez Boule de Feu![/color]")
+	if SFX and SFX.has_method("play_fireball"):
+		SFX.play_fireball()
 	_flash_screen(Color(1.0, 0.4, 0.1), 0.2)
-	
-	var total_damage = 0
-	for i in range(_enemy_units.size() - 1, -1, -1):
-		var target = _enemy_units[i]
-		var magic_res = target.get("magic_res", 2)
-		var damage = max(1, int((base_damage - magic_res) * randf_range(0.9, 1.1)))
-		target["hp"] = max(0, target["hp"] - damage)
-		total_damage += damage
-		
-		_show_damage_number(_enemy_container.get_child(i), damage, true)
-		
-		if target["hp"] <= 0:
-			_log_message("[color=#ff4444]" + target.get("name", "Ennemi") + " est brûlé vif![/color]")
-			_enemy_units.remove_at(i)
-	
-	_log_message("[color=#ff5522]Boule de Feu inflige [color=#ff4444]" + str(total_damage) + "[/color] dégâts totaux![/color]")
-	_shake_panel(5.0, 0.3)
+
+	var magic_res = _enemy_unit.get("magic_res", 2)
+	var damage = max(1, int((base_damage - magic_res) * randf_range(0.9, 1.1)))
+	_enemy_unit["hp"] = max(0, _enemy_unit["hp"] - damage)
+
+	_show_damage_number(_enemy_card, damage, true)
+	_log_message("[color=#ff5522]Boule de Feu inflige [color=#ff4444]" + str(damage) + "[/color] degats![/color]")
+	_shake_panel(8.0, 0.4, Vector2.RIGHT)
 	_update_unit_displays()
-	
-	if _enemy_units.is_empty():
+
+	if _enemy_unit.get("hp", 0) <= 0:
 		_end_combat(true)
 		return
-	
+
 	_process_next_turn()
 
 func _cast_lightning() -> void:
-	if _enemy_units.is_empty():
+	if _enemy_unit.get("hp", 0) <= 0:
 		_end_combat(true)
 		return
-	
-	var target_idx = _selected_target
-	if target_idx < 0 or target_idx >= _enemy_units.size() or _enemy_units[target_idx].get("hp", 0) <= 0:
-		target_idx = _find_first_alive_unit(_enemy_units)
-		if target_idx < 0:
-			_end_combat(true)
-			return
-	
-	var attacker = _hero_units[0] if not _hero_units.is_empty() else {"magic": 20, "name": "Heros"}
-	var target = _enemy_units[target_idx]
-	var base_damage = attacker.get("magic", 20)
-	var magic_res = target.get("magic_res", 2)
-	var damage = max(1, int((base_damage - magic_res) * randf_range(1.2, 1.5)))  # Higher damage
-	
-	target["hp"] = max(0, target["hp"] - damage)
-	
-	_log_message("[color=#5588ff]Vous lancez Éclair sur " + target.get("name", "Ennemi") + "![/color]")
-	_log_message("[color=#5588ff]Éclair inflige [color=#ff4444]" + str(damage) + "[/color] dégâts![/color]")
+
+	var base_damage = _hero_unit.get("magic", 20)
+	var magic_res = _enemy_unit.get("magic_res", 2)
+	var damage = max(1, int((base_damage - magic_res) * randf_range(1.2, 1.5)))
+	_enemy_unit["hp"] = max(0, _enemy_unit["hp"] - damage)
+
+	_log_message("[color=#5588ff]Vous lancez Eclair! [/color][color=#ff4444]" + str(damage) + "[/color] degats![/color]")
+	if SFX and SFX.has_method("play_lightning"):
+		SFX.play_lightning()
 	_flash_screen(Color(0.6, 0.8, 1.0), 0.15)
 	_shake_panel(6.0, 0.25)
-	_animate_unit_card_hit(_enemy_container.get_child(target_idx))
-	_show_damage_number(_enemy_container.get_child(target_idx), damage, true)
-	_animate_attack_projectile(_hero_container.get_child(0), _enemy_container.get_child(target_idx), true)
+	_show_damage_number(_enemy_card, damage, true)
 	_update_unit_displays()
-	
-	if target["hp"] <= 0:
-		_log_message("[color=#ff4444]" + target.get("name", "Ennemi") + " est électrocuté![/color]")
-		_enemy_units.remove_at(target_idx)
-		
-		if _enemy_units.is_empty():
-			_end_combat(true)
-			return
-	
+
+	if _enemy_unit.get("hp", 0) <= 0:
+		_end_combat(true)
+		return
+
 	_process_next_turn()
 
 func _cast_heal() -> void:
-	if _hero_units.is_empty():
-		_end_combat(false)
-		return
-	
-	var healer = _hero_units[0] if not _hero_units.is_empty() else {"magic": 12, "name": "Heros"}
-	var heal_power = healer.get("magic", 12)
-	
-	_log_message("[color=#22aa44]Vous lancez Soin![/color]")
+	var heal_power = _hero_unit.get("magic", 12)
+	var max_hp = _hero_unit.get("max_hp", _hero_unit.get("hp", 1))
+	var current_hp = _hero_unit.get("hp", 0)
+	var heal_amount = min(heal_power, max_hp - current_hp)
+	_hero_unit["hp"] = min(max_hp, current_hp + heal_amount)
+
+	_log_message("[color=#22aa44]Vous lancez Soin! +" + str(heal_amount) + " PV[/color]")
+	if SFX and SFX.has_method("play_heal"):
+		SFX.play_heal()
 	_flash_screen(Color(0.3, 0.9, 0.4), 0.2)
-	
-	var total_healed = 0
-	for i in range(_hero_units.size()):
-		var unit = _hero_units[i]
-		var max_hp = unit.get("max_hp", unit.get("hp", 1))
-		var current_hp = unit.get("hp", 0)
-		var heal_amount = min(heal_power, max_hp - current_hp)
-		unit["hp"] = min(max_hp, current_hp + heal_amount)
-		total_healed += heal_amount
-		
-		if heal_amount > 0:
-			_show_heal_number(_hero_container.get_child(i), heal_amount)
-	
-	_log_message("[color=#22aa44]Soin restaure [color=#44ff66]" + str(total_healed) + "[/color] PV![/color]")
+	_show_heal_number(_hero_card, heal_amount)
 	_update_unit_displays()
 	_process_next_turn()
 
@@ -709,6 +1003,31 @@ func _cast_rage() -> void:
 	_rage_indicator.visible = true
 	_log_message("[color=#ff8822]Vous lancez Fureur! (+50% attaque)[/color]")
 	_flash_screen(Color(1.0, 0.5, 0.1), 0.2)
+	_update_unit_displays()
+	_process_next_turn()
+
+func _cast_ice_shard() -> void:
+	if _enemy_unit.get("hp", 0) <= 0:
+		_end_combat(true)
+		return
+
+	var base_damage = _hero_unit.get("magic", 18)
+	var magic_res = _enemy_unit.get("magic_res", 2)
+	var damage = max(1, int((base_damage - magic_res) * randf_range(1.5, 1.8)))
+	_enemy_unit["hp"] = max(0, _enemy_unit["hp"] - damage)
+
+	_log_message("[color=#6699ff]Eclat de Glace inflige [color=#ff4444]" + str(damage) + "[/color] degats![/color]")
+	if SFX and SFX.has_method("play_ice"):
+		SFX.play_ice()
+	_flash_screen(Color(0.5, 0.7, 1.0), 0.15)
+	_shake_panel(8.0, 0.3, Vector2.RIGHT)
+	_show_damage_number(_enemy_card, damage, true)
+	_update_unit_displays()
+
+	if _enemy_unit.get("hp", 0) <= 0:
+		_end_combat(true)
+		return
+
 	_process_next_turn()
 
 func _on_flee_pressed() -> void:
@@ -722,386 +1041,391 @@ func _on_flee_pressed() -> void:
 		_log_message("[color=#c85a5a]Fuite echouee![/color]")
 		_process_next_turn()
 
-func _process_hero_attack(is_magic: bool = false) -> void:
-	if _enemy_units.is_empty():
+func _process_hero_attack() -> void:
+	if not _in_combat:
+		return
+	if _enemy_unit.get("hp", 0) <= 0:
 		_end_combat(true)
 		return
 
-	var target_idx = _selected_target
-	if target_idx < 0 or target_idx >= _enemy_units.size() or _enemy_units[target_idx].get("hp", 0) <= 0:
-		target_idx = _find_first_alive_unit(_enemy_units)
-		if target_idx < 0:
-			_end_combat(true)
-			return
+	var attacker = _hero_unit
+	var target = _enemy_unit
+	var dmg_result := _calculate_damage(attacker, target, false)
+	var damage: int = dmg_result.damage
+	var is_critical: bool = dmg_result.critical
 
-	var attacker = _hero_units[0] if not _hero_units.is_empty() else {"attack": 10, "name": "Heros"}
-	var target = _enemy_units[target_idx]
-
-	var damage = _calculate_damage(attacker, target, is_magic)
 	target["hp"] = max(0, target["hp"] - damage)
 
-	_log_message("[color=#6ec3e0]" + attacker.get("name", "Heros") + "[/color] inflige [color=#ff4444]" + str(damage) + "[/color] degats a " + target.get("name", "Ennemi"))
+	var crit_tag := "[color=#ffdd44]CRITIQUE! [/color]" if is_critical else ""
+	_log_message("[color=#6ec3e0]" + attacker.get("name", "Heros") + "[/color] " + crit_tag + "inflige [color=#ff4444]" + str(damage) + "[/color] degats a " + target.get("name", "Ennemi"))
 
 	_flash_screen(Color(1.0, 0.3, 0.2), 0.1)
-	_shake_panel(4.0, 0.2)
-	_animate_unit_card_hit(_enemy_container.get_child(target_idx))
-	_show_damage_number(_enemy_container.get_child(target_idx), damage, is_magic)
-	_animate_attack_projectile(_hero_container.get_child(0), _enemy_container.get_child(target_idx), is_magic)
+	_shake_panel(4.0, 0.2, Vector2.RIGHT)
+
+	_animate_unit_card_hit(_enemy_card)
+	_show_damage_number(_enemy_card, damage, false)
+
+	if not _hero_card or not _enemy_card:
+		_update_unit_displays()
+		if target["hp"] <= 0:
+			_end_combat(true)
+		else:
+			_process_next_turn()
+		return
+
+	var start_pos: Vector2 = _hero_card.global_position + _hero_card.size / 2
+	var end_pos: Vector2 = _enemy_card.global_position + _enemy_card.size / 2
+	_vfx.projectile_trail(start_pos, end_pos, Color(1.0, 0.7, 0.2), 8)
+	_vfx.sword_slash(end_pos, (end_pos - start_pos).normalized(), 1.0)
+	_vfx.hit_impact(end_pos, 0.8)
+	_vfx.fire_explosion(end_pos, 0.6)
+
+	if is_critical:
+		_show_critical_text(end_pos)
+		_vfx.critical_hit(end_pos)
+		if SFX and SFX.has_method("play_critical"):
+			SFX.play_critical()
 
 	if target["hp"] <= 0:
 		_log_message("[color=#ff4444]" + target.get("name", "Ennemi") + " est vaincu![/color]")
-		_enemy_units.remove_at(target_idx)
+		if SFX and SFX.has_method("play_death"):
+			SFX.play_death()
+		_animate_card_death(_enemy_card)
+		_vfx.death_effect(end_pos)
 
-		if _enemy_units.is_empty():
-			_end_combat(true)
-			return
-
-	# Update HP bars after damage
 	_update_unit_displays()
+
+	if target["hp"] <= 0:
+		_end_combat(true)
+		return
 
 	_process_next_turn()
 
 func _process_enemy_turn() -> void:
 	if not _in_combat:
 		return
-
-	if _hero_units.is_empty():
+	if _hero_unit.get("hp", 0) <= 0:
 		_end_combat(false)
 		return
 
-	var attacker = _enemy_units[0] if not _enemy_units.is_empty() else {"attack": 8, "name": "Ennemi"}
-	var target_idx = _select_enemy_target()
-	if target_idx < 0:
-		_end_combat(false)
-		return
+	var attacker = _enemy_unit
+	var target = _hero_unit
+	var dmg_result := _calculate_damage(attacker, target, false)
+	var damage: int = dmg_result.damage
+	var is_critical: bool = dmg_result.critical
 
-	var target = _hero_units[target_idx]
-	var damage = _calculate_damage(attacker, target, false)
 	target["hp"] = max(0, target["hp"] - damage)
 
-	_log_message("[color=#ff6666]" + attacker.get("name", "Ennemi") + "[/color] inflige [color=#ff4444]" + str(damage) + "[/color] degats a " + target.get("name", "Heros"))
+	var crit_tag := "[color=#ffdd44]CRITIQUE! [/color]" if is_critical else ""
+	if SFX and SFX.has_method("play_sword_hit"):
+		SFX.play_sword_hit()
+	await get_tree().create_timer(0.3).timeout
+
+	_log_message("[color=#ff6666]" + attacker.get("name", "Ennemi") + "[/color] " + crit_tag + "inflige [color=#ff4444]" + str(damage) + "[/color] degats a " + target.get("name", "Heros"))
 
 	_flash_screen(Color(0.8, 0.1, 0.1), 0.1)
-	_shake_panel(6.0, 0.25)
-	_animate_unit_card_hit(_hero_container.get_child(target_idx))
-	_show_damage_number(_hero_container.get_child(target_idx), damage, false)
-	_animate_attack_projectile(_enemy_container.get_child(0), _hero_container.get_child(target_idx), false)
-	
-	# Update HP bars after damage
-	_update_unit_displays()
+	_shake_panel(6.0, 0.25, Vector2.LEFT)
+
+	_animate_unit_card_hit(_hero_card)
+	_show_damage_number(_hero_card, damage, false)
+
+	if _hero_card and _enemy_card:
+		var e_start: Vector2 = _enemy_card.global_position + _enemy_card.size / 2
+		var e_end: Vector2 = _hero_card.global_position + _hero_card.size / 2
+		_vfx.projectile_trail(e_start, e_end, Color(1.0, 0.3, 0.1), 6)
+		_vfx.sword_slash(e_end, (e_end - e_start).normalized(), 0.8)
+		_vfx.hit_impact(e_end, 0.6)
+		_vfx.fire_explosion(e_end, 0.4)
+
+	if is_critical:
+		if _hero_card:
+			_show_critical_text(_hero_card.global_position + _hero_card.size / 2)
+			_vfx.critical_hit(_hero_card.global_position + _hero_card.size / 2)
+		if SFX and SFX.has_method("play_critical"):
+			SFX.play_critical()
 
 	if target["hp"] <= 0:
 		_log_message("[color=#ff4444]" + target.get("name", "Heros") + " est vaincu![/color]")
-		_hero_units.remove_at(target_idx)
+		if SFX and SFX.has_method("play_death"):
+			SFX.play_death()
+		_animate_card_death(_hero_card)
+		if _hero_card:
+			_vfx.death_effect(_hero_card.global_position + _hero_card.size / 2)
 
-		if _hero_units.is_empty():
-			_end_combat(false)
-			return
+	_update_unit_displays()
+
+	if target["hp"] <= 0:
+		_end_combat(false)
+		return
 
 	_process_next_turn()
 
-func _select_enemy_target() -> int:
-	if _hero_units.is_empty():
-		return -1
-	
-	# Different AI strategies based on random chance
-	var strategy = randf()
-	
-	if strategy < 0.4:
-		# Target weakest unit (lowest HP)
-		var weakest_idx = -1
-		var lowest_hp = 999999
-		for i in range(_hero_units.size()):
-			if _hero_units[i].get("hp", 0) > 0 and _hero_units[i].get("hp", 0) < lowest_hp:
-				lowest_hp = _hero_units[i].get("hp", 0)
-				weakest_idx = i
-		return weakest_idx if weakest_idx >= 0 else _find_first_alive_unit(_hero_units)
-	elif strategy < 0.7:
-		# Target strongest unit (highest attack)
-		var strongest_idx = -1
-		var highest_attack = -1
-		for i in range(_hero_units.size()):
-			if _hero_units[i].get("hp", 0) > 0 and _hero_units[i].get("attack", 0) > highest_attack:
-				highest_attack = _hero_units[i].get("attack", 0)
-				strongest_idx = i
-		return strongest_idx if strongest_idx >= 0 else _find_first_alive_unit(_hero_units)
-	else:
-		# Random target
-		var alive_units = []
-		for i in range(_hero_units.size()):
-			if _hero_units[i].get("hp", 0) > 0:
-				alive_units.append(i)
-		if alive_units.is_empty():
-			return -1
-		return alive_units[randi() % alive_units.size()]
-
-func _calculate_damage(attacker: Dictionary, target: Dictionary, is_magic: bool) -> int:
+func _calculate_damage(attacker: Dictionary, target: Dictionary, is_magic: bool) -> Dictionary:
 	var base_dmg = attacker.get("attack", 10)
 	var defense = target.get("defense", 5)
-	var random_factor = randf_range(0.8, 1.2)
+	var random_factor: float = randf_range(0.8, 1.2)
 
 	if is_magic:
 		base_dmg = attacker.get("magic", 10)
 		defense = target.get("magic_res", 2)
-	
-	# Apply defense bonus if hero is defending
+
 	if _hero_defending and not is_magic:
-		defense = int(defense * 1.5)  # 50% defense bonus
-	
-	# Apply attack buff if hero has rage
+		defense = int(defense * 1.5)
+
 	if _hero_attack_buff and not is_magic:
-		base_dmg = int(base_dmg * 1.5)  # 50% attack bonus
+		base_dmg = int(base_dmg * 1.5)
 
 	var damage = max(1, int((base_dmg - defense) * random_factor))
-	return damage
-
-func _find_first_alive_unit(units: Array) -> int:
-	for i in range(units.size()):
-		if units[i].get("hp", 0) > 0:
-			return i
-	return -1
+	var is_critical: bool = random_factor >= 1.1
+	return {"damage": damage, "critical": is_critical}
 
 func _process_next_turn() -> void:
+	if not _in_combat:
+		return
 	_current_turn = 1 - _current_turn
 
 	if _current_turn == 0:
 		_round_count += 1
 		_round_label.text = "Round " + str(_round_count)
 		_turn_label.text = "Votre tour"
-		_turn_label.add_theme_color_override("font_color", Color(0.3, 0.7, 0.9))
+		_turn_label.add_theme_color_override("font_color", COLOR_TEAL)
 		_action_bar.visible = true
-		_hero_defending = false  # Reset defense bonus at start of hero turn
-		_hero_attack_buff = false  # Reset attack buff at start of hero turn
-		_defense_indicator.visible = false  # Hide defense indicator
-		_rage_indicator.visible = false  # Hide rage indicator
+		_hero_defending = false
+		_hero_attack_buff = false
+		_defense_indicator.visible = false
+		_rage_indicator.visible = false
+		_hero_mana = mini(_hero_max_mana, _hero_mana + 5)
+		_update_mana_display()
+		_show_turn_banner("Votre Tour", COLOR_TEAL)
 	else:
 		_turn_label.text = "Tour ennemi"
-		_turn_label.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
+		_turn_label.add_theme_color_override("font_color", COLOR_CRIMSON)
 		_action_bar.visible = false
-		await get_tree().create_timer(1.0).timeout
+		_show_turn_banner("Tour Ennemi", COLOR_CRIMSON)
+		await get_tree().create_timer(0.8).timeout
 		_process_enemy_turn()
 
 # ============================================
-# UI UPDATES
+# UI UPDATES — 1v1 cards
 # ============================================
 
 func _update_unit_displays() -> void:
-	# Clear containers
-	for child in _hero_container.get_children():
-		child.queue_free()
-	for child in _enemy_container.get_children():
-		child.queue_free()
+	if _hero_card:
+		_hero_card.queue_free()
+	if _enemy_card:
+		_enemy_card.queue_free()
 
-	# Add hero units
-	for unit in _hero_units:
-		var card = _create_unit_card(unit, true)
-		_hero_container.add_child(card)
+	_hero_card = _create_unit_card(_hero_unit, true)
+	_enemy_card = _create_unit_card(_enemy_unit, false)
 
-	# Add enemy units
-	for i in range(_enemy_units.size()):
-		var unit = _enemy_units[i]
-		var card = _create_unit_card(unit, false)
-		card.gui_input.connect(func(event): _on_enemy_card_clicked(event, i))
-		_enemy_container.add_child(card)
+	_hero_card.position = Vector2(60, 120)
+	_hero_card.custom_minimum_size = Vector2(200, 120)
+	_combat_panel.add_child(_hero_card)
 
-	# Update info labels
-	var hero_total_hp = 0
-	var hero_max_hp = 0
-	for unit in _hero_units:
-		hero_total_hp += unit.get("hp", 0)
-		hero_max_hp += unit.get("max_hp", unit.get("hp", 1))
+	_enemy_card.position = Vector2(1020, 120)
+	_enemy_card.custom_minimum_size = Vector2(200, 120)
+	_combat_panel.add_child(_enemy_card)
 
-	var enemy_total_hp = 0
-	var enemy_max_hp = 0
-	for unit in _enemy_units:
-		enemy_total_hp += unit.get("hp", 0)
-		enemy_max_hp += unit.get("max_hp", unit.get("hp", 1))
-
-	_hero_info_label.text = "HP: " + str(hero_total_hp) + "/" + str(hero_max_hp)
-	_enemy_info_label.text = "HP: " + str(enemy_total_hp) + "/" + str(enemy_max_hp)
+	_hero_info_label.text = _hero_unit.get("name", "Heros") + " | ATK:" + str(_hero_unit.get("attack", 0)) + " DEF:" + str(_hero_unit.get("defense", 0))
+	_enemy_info_label.text = _enemy_unit.get("name", "Ennemi") + " | ATK:" + str(_enemy_unit.get("attack", 0)) + " DEF:" + str(_enemy_unit.get("defense", 0))
 
 func _create_unit_card(unit: Dictionary, is_hero: bool) -> Panel:
 	var card = Panel.new()
-	card.custom_minimum_size = Vector2(90, 120)
-	card.size = Vector2(90, 120)
+	card.size = Vector2(160, 100)
 
-	var style = StyleBoxFlat.new()
-	if is_hero:
-		style.bg_color = Color(0.10, 0.22, 0.35)
-		style.border_color = Color(0.25, 0.50, 0.75)
-	else:
-		style.bg_color = Color(0.35, 0.12, 0.12)
-		style.border_color = Color(0.75, 0.30, 0.25)
-	style.border_width_left = 2
-	style.border_width_right = 2
-	style.border_width_top = 2
-	style.border_width_bottom = 2
-	style.corner_radius_top_left = 8
-	style.corner_radius_top_right = 8
-	style.corner_radius_bottom_left = 8
-	style.corner_radius_bottom_right = 8
-	card.add_theme_stylebox_override("panel", style)
+	var card_style = StyleBoxFlat.new()
+	card_style.bg_color = COLOR_HERO_BLUE if is_hero else COLOR_ENEMY_RED
+	card_style.border_color = Color(0.35, 0.60, 0.85) if is_hero else Color(0.85, 0.25, 0.25)
+	card_style.border_width_left = 2
+	card_style.border_width_right = 2
+	card_style.border_width_top = 2
+	card_style.border_width_bottom = 2
+	card_style.corner_radius_top_left = 12
+	card_style.corner_radius_top_right = 12
+	card_style.corner_radius_bottom_left = 12
+	card_style.corner_radius_bottom_right = 12
+	card.add_theme_stylebox_override("panel", card_style)
 
-	# Unit icon placeholder
-	var icon = ColorRect.new()
-	icon.position = Vector2(15, 10)
-	icon.size = Vector2(60, 60)
-	icon.color = Color(0.5, 0.5, 0.5, 0.3)
-	card.add_child(icon)
-
-	# Unit name
 	var name_label = Label.new()
-	name_label.position = Vector2(5, 75)
-	name_label.size = Vector2(80, 20)
-	name_label.text = unit.get("name", "Unit")
-	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name_label.add_theme_font_size_override("font_size", 10)
-	name_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.85))
+	name_label.position = Vector2(8, 4)
+	name_label.size = Vector2(144, 20)
+	name_label.text = unit.get("name", "Unite")
+	name_label.add_theme_color_override("font_color", COLOR_TEXT_LIGHT)
+	name_label.add_theme_font_size_override("font_size", 12)
 	card.add_child(name_label)
 
-	# HP bar background
-	var hp_bg = ColorRect.new()
-	hp_bg.position = Vector2(10, 100)
-	hp_bg.size = Vector2(70, 10)
-	hp_bg.color = Color(0.2, 0.2, 0.2)
-	card.add_child(hp_bg)
+	var hp_bar_bg = ColorRect.new()
+	hp_bar_bg.position = Vector2(8, 28)
+	hp_bar_bg.size = Vector2(144, 12)
+	hp_bar_bg.color = Color(0.20, 0.04, 0.04)
+	card.add_child(hp_bar_bg)
 
-	# HP bar fill
-	var max_hp = unit.get("max_hp", unit.get("hp", 1))
-	var hp_ratio = float(unit.get("hp", 0)) / max_hp if max_hp > 0 else 0
 	var hp_fill = ColorRect.new()
-	hp_fill.position = Vector2(10, 100)
-	hp_fill.size = Vector2(70 * hp_ratio, 10)
-	if hp_ratio > 0.5:
-		hp_fill.color = Color(0.2, 0.7, 0.3)
-	elif hp_ratio > 0.25:
-		hp_fill.color = Color(0.85, 0.65, 0.15)
-	else:
-		hp_fill.color = Color(0.8, 0.15, 0.15)
+	hp_fill.name = "HPFill"
+	hp_fill.position = Vector2(8, 28)
+	var hp_ratio: float = float(unit.get("hp", 1)) / max(1, unit.get("max_hp", 1))
+	hp_fill.size = Vector2(144 * hp_ratio, 12)
+	hp_fill.color = COLOR_GREEN if hp_ratio > 0.5 else (Color(0.95, 0.75, 0.10) if hp_ratio > 0.25 else COLOR_RED)
 	card.add_child(hp_fill)
 
-	# HP text
-	var hp_label = Label.new()
-	hp_label.position = Vector2(5, 112)
-	hp_label.size = Vector2(80, 16)
-	hp_label.text = str(unit.get("hp", 0)) + "/" + str(max_hp)
-	hp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hp_label.add_theme_font_size_override("font_size", 9)
-	card.add_child(hp_label)
+	var hp_text = Label.new()
+	hp_text.position = Vector2(8, 28)
+	hp_text.size = Vector2(144, 12)
+	hp_text.text = str(unit.get("hp", 0)) + "/" + str(unit.get("max_hp", 1))
+	hp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hp_text.add_theme_color_override("font_color", Color(0.95, 0.95, 0.92))
+	hp_text.add_theme_font_size_override("font_size", 9)
+	card.add_child(hp_text)
+
+	var stats = Label.new()
+	stats.position = Vector2(8, 44)
+	stats.size = Vector2(144, 16)
+	var atk = unit.get("attack", 0)
+	var def = unit.get("defense", 0)
+	var sp = ""
+	if unit.get("magic", 0) > 0:
+		sp = " MAG:" + str(unit.get("magic", 0))
+	stats.text = "ATK:" + str(atk) + " DEF:" + str(def) + sp
+	stats.add_theme_color_override("font_color", Color(0.80, 0.78, 0.72))
+	stats.add_theme_font_size_override("font_size", 10)
+	card.add_child(stats)
+
+	if _hero_defending and is_hero:
+		var sh = Label.new()
+		sh.position = Vector2(120, 4)
+		sh.text = "🛡"
+		sh.add_theme_font_size_override("font_size", 16)
+		card.add_child(sh)
+
+	if _hero_attack_buff and is_hero:
+		var ra = Label.new()
+		ra.position = Vector2(140, 4)
+		ra.text = "⚔"
+		ra.add_theme_font_size_override("font_size", 16)
+		card.add_child(ra)
 
 	return card
-
-func _on_enemy_card_clicked(event: InputEvent, index: int) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if _current_turn == 0 and _in_combat:
-			_selected_target = index
-			_enemy_target_label.text = "Cible: " + _enemy_units[index].get("name", "Ennemi")
-			for i in range(_enemy_container.get_child_count()):
-				var card = _enemy_container.get_child(i)
-				var style = card.get_theme_stylebox("panel").duplicate()
-				if i == index:
-					style.border_color = Color(0.95, 0.85, 0.25)
-					style.border_width_left = 3
-					style.border_width_right = 3
-					style.border_width_top = 3
-					style.border_width_bottom = 3
-				else:
-					style.border_color = Color(0.75, 0.30, 0.25)
-					style.border_width_left = 2
-					style.border_width_right = 2
-					style.border_width_top = 2
-					style.border_width_bottom = 2
-				card.add_theme_stylebox_override("panel", style)
-
-func _log_message(msg: String) -> void:
-	_combat_log.text += msg + "\n"
-	_combat_log.scroll_to_line(_combat_log.get_line_count())
 
 # ============================================
 # VISUAL EFFECTS
 # ============================================
 
-func _flash_screen(color: Color, duration: float = 0.15) -> void:
-	var flash = ColorRect.new()
-	flash.color = color
-	flash.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(flash)
+func _show_turn_banner(text: String, color: Color) -> void:
+	var banner = Label.new()
+	banner.text = text
+	banner.add_theme_font_size_override("font_size", 28)
+	banner.add_theme_color_override("font_color", color)
+	banner.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.50))
+	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	banner.set_anchors_preset(Control.PRESET_CENTER)
+	banner.position = Vector2(0, -100)
+	banner.size = Vector2(0, 80)
+	_combat_panel.add_child(banner)
 
-	var tween = create_tween()
-	tween.tween_property(flash, "color:a", 0.0, duration).from(0.6)
-	tween.tween_callback(flash.queue_free)
+	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	tween.tween_property(banner, "position:y", -120, 0.6)
+	tween.parallel().tween_property(banner, "modulate:a", 0.0, 0.6)
+	tween.tween_callback(func(): banner.queue_free())
 
-func _shake_panel(intensity: float, duration: float) -> void:
-	var tween = create_tween()
-	var original_pos = _combat_panel.position
-	var steps = int(duration * 20)
-	for i in range(steps):
-		var offset = Vector2(randf_range(-intensity, intensity), randf_range(-intensity, intensity))
-		tween.tween_property(_combat_panel, "position", original_pos + offset, 0.03)
-	tween.tween_property(_combat_panel, "position", original_pos, 0.05)
+func _show_damage_number(target_node: Control, damage: int, is_magic: bool) -> void:
+	if not target_node:
+		return
+	var dmg_label = Label.new()
+	dmg_label.text = "-" + str(damage)
+	dmg_label.add_theme_font_size_override("font_size", 22 if not is_magic else 26)
+	dmg_label.add_theme_color_override("font_color", Color(1.0, 0.6, 0.2) if not is_magic else Color(0.9, 0.4, 1.0))
+	dmg_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.80))
+
+	var bounds: Vector2 = target_node.size
+	dmg_label.position = target_node.position + Vector2(bounds.x * 0.5, -10)
+	dmg_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dmg_label.custom_minimum_size = Vector2(60, 30)
+	target_node.add_child(dmg_label)
+
+	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(dmg_label, "position:y", dmg_label.position.y - 30, 0.6)
+	tween.parallel().tween_property(dmg_label, "modulate:a", 0.0, 0.6)
+	tween.tween_callback(func(): if is_instance_valid(dmg_label): dmg_label.queue_free())
+
+func _show_heal_number(target_node: Control, amount: int) -> void:
+	if not target_node:
+		return
+	var heal_label = Label.new()
+	heal_label.text = "+" + str(amount)
+	heal_label.add_theme_font_size_override("font_size", 22)
+	heal_label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.4))
+	heal_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.80))
+
+	var bounds: Vector2 = target_node.size
+	heal_label.position = target_node.position + Vector2(bounds.x * 0.5, -10)
+	heal_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heal_label.custom_minimum_size = Vector2(60, 30)
+	target_node.add_child(heal_label)
+
+	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(heal_label, "position:y", heal_label.position.y - 30, 0.6)
+	tween.parallel().tween_property(heal_label, "modulate:a", 0.0, 0.6)
+	tween.tween_callback(func(): if is_instance_valid(heal_label): heal_label.queue_free())
+
+func _show_critical_text(pos: Vector2) -> void:
+	var crit = Label.new()
+	crit.text = "CRITIQUE!"
+	crit.add_theme_font_size_override("font_size", 18)
+	crit.add_theme_color_override("font_color", Color(1.0, 0.85, 0.15))
+	crit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	crit.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	crit.position = pos - _combat_panel.position
+	crit.position.y -= 20
+	crit.custom_minimum_size = Vector2(120, 24)
+	_combat_panel.add_child(crit)
+
+	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(crit, "position:y", crit.position.y - 20, 0.5)
+	tween.parallel().tween_property(crit, "modulate:a", 0.0, 0.6)
+	tween.tween_callback(func(): if is_instance_valid(crit): crit.queue_free())
 
 func _animate_unit_card_hit(card: Control) -> void:
 	if not card:
 		return
-	var tween = create_tween().set_ease(Tween.EASE_OUT)
-	tween.tween_property(card, "modulate", Color(1.0, 0.3, 0.3), 0.05)
-	tween.tween_property(card, "modulate", Color(1.0, 1.0, 1.0), 0.2)
+	var orig_pos = card.position
+	var shake = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	shake.tween_property(card, "position", orig_pos + Vector2(8, 0), 0.05)
+	shake.tween_property(card, "position", orig_pos - Vector2(6, 0), 0.05)
+	shake.tween_property(card, "position", orig_pos + Vector2(4, 0), 0.05)
+	shake.tween_property(card, "position", orig_pos, 0.05)
 
-func _show_damage_number(card: Control, damage: int, is_magic: bool) -> void:
+	var flash = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	flash.tween_property(card, "modulate", Color(1.5, 0.5, 0.5), 0.05)
+	flash.tween_property(card, "modulate", Color.WHITE, 0.15)
+
+func _animate_card_death(card: Control) -> void:
 	if not card:
 		return
-	
-	var damage_label = Label.new()
-	damage_label.text = "-" + str(damage)
-	damage_label.add_theme_font_size_override("font_size", 24)
-	if is_magic:
-		damage_label.add_theme_color_override("font_color", Color(0.6, 0.4, 1.0))
-	else:
-		damage_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.2))
-	
-	var card_global_pos = card.global_position
-	damage_label.position = card_global_pos + Vector2(card.size.x / 2 - 20, card.size.y / 2 - 20)
-	add_child(damage_label)
-	
-	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
-	tween.parallel().tween_property(damage_label, "position:y", damage_label.position.y - 50, 0.6)
-	tween.parallel().tween_property(damage_label, "modulate:a", 0.0, 0.6)
-	tween.tween_callback(damage_label.queue_free)
+	var dt = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	dt.tween_property(card, "modulate", Color(0.5, 0.0, 0.0), 0.3)
+	dt.parallel().tween_property(card, "scale", Vector2(0.5, 0.5), 0.3)
 
-func _show_heal_number(card: Control, heal_amount: int) -> void:
-	if not card:
-		return
-	
-	var heal_label = Label.new()
-	heal_label.text = "+" + str(heal_amount)
-	heal_label.add_theme_font_size_override("font_size", 24)
-	heal_label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.5))
-	
-	var card_global_pos = card.global_position
-	heal_label.position = card_global_pos + Vector2(card.size.x / 2 - 20, card.size.y / 2 - 20)
-	add_child(heal_label)
-	
-	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
-	tween.parallel().tween_property(heal_label, "position:y", heal_label.position.y - 50, 0.6)
-	tween.parallel().tween_property(heal_label, "modulate:a", 0.0, 0.6)
-	tween.tween_callback(heal_label.queue_free)
+func _flash_screen(color: Color, duration: float) -> void:
+	var flash = ColorRect.new()
+	flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	flash.color = color
+	flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_combat_panel.add_child(flash)
+	var tween = create_tween()
+	tween.tween_property(flash, "modulate:a", 0.0, duration)
+	tween.tween_callback(func(): flash.queue_free())
 
-func _animate_attack_projectile(attacker: Control, target: Control, is_magic: bool) -> void:
-	if not attacker or not target:
+func _shake_panel(strength: float, duration: float, direction: Vector2 = Vector2.RIGHT) -> void:
+	if not _combat_panel:
 		return
-	
-	var projectile = ColorRect.new()
-	projectile.size = Vector2(8, 8)
-	if is_magic:
-		projectile.color = Color(0.6, 0.4, 1.0)
-	else:
-		projectile.color = Color(1.0, 0.6, 0.2)
-	
-	var start_pos = attacker.global_position + attacker.size / 2
-	var end_pos = target.global_position + target.size / 2
-	projectile.position = start_pos
-	add_child(projectile)
-	
-	var tween = create_tween().set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
-	tween.tween_property(projectile, "position", end_pos, 0.2)
-	tween.tween_callback(projectile.queue_free)
+	var orig = _combat_panel.position
+	var shake = create_tween().set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
+	shake.tween_property(_combat_panel, "position", orig + direction * strength, duration * 0.15)
+	shake.tween_property(_combat_panel, "position", orig - direction * strength * 0.6, duration * 0.15)
+	shake.tween_property(_combat_panel, "position", orig + direction * strength * 0.3, duration * 0.15)
+	shake.tween_property(_combat_panel, "position", orig, duration * 0.15)
+
+func _log_message(msg: String) -> void:
+	if _combat_log:
+		_combat_log.append_text(msg + "\n")

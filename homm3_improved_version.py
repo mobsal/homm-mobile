@@ -91,7 +91,7 @@ class HoMM3ImprovedGenerator:
         print(f"Generated improved HoMM3 assets in: {output_dir}")
 
 def main():
-    output_dir = r"C:\Dev\projet-jeu\homm-mobile\assets"
+    output_dir = sys.argv[1] if len(sys.argv) > 1 else "homm-mobile/assets"
     
     generator = HoMM3ImprovedGenerator()
     generator.generate_improved_assets(output_dir)

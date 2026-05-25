@@ -12,9 +12,11 @@ from PIL import Image, ImageDraw, ImageFont
 import random
 
 class HoMM3AdvancedSpriteGenerator:
-    def __init__(self):
+    def __init__(self, output_dir=None):
         self.sprite_size = 64
-        self.output_dir = Path("C:/Dev/projet-jeu/homm-mobile/assets/homm3_advanced")
+        if output_dir is None:
+            output_dir = Path("homm-mobile/assets/homm3_advanced")
+        self.output_dir = Path(output_dir)
         
         # Palette HoMM3 authentique
         self.colors = {
@@ -577,12 +579,19 @@ class HoMM3AdvancedSpriteGenerator:
         
         print(f"✅ Éléments UI créés avec style HoMM3 authentique")
     
-    def _draw_border(self, pixels, x, y, width, height, color):
-        """Dessine une bordure"""
-        for py in range(y, y + height):
+    def _draw_border(self, pixels, x, y, width, height, color, thickness=1):
+        """Dessine une bordure (outline seulement, pas de remplissage)"""
+        for t in range(thickness):
+            # Bordure horizontale haute et basse
             for px in range(x, x + width):
-                if 0 <= px < self.sprite_size and 0 <= py < self.sprite_size:
-                    pixels[px, py] = color
+                for py in (y + t, y + height - 1 - t):
+                    if 0 <= px < self.sprite_size and 0 <= py < self.sprite_size:
+                        pixels[px, py] = color
+            # Bordure verticale gauche et droite
+            for py in range(y + t, y + height - t):
+                for px in (x + t, x + width - 1 - t):
+                    if 0 <= px < self.sprite_size and 0 <= py < self.sprite_size:
+                        pixels[px, py] = color
     
     def generate_hero_portraits(self):
         """Génère des portraits de héros HoMM3"""
@@ -685,7 +694,9 @@ class HoMM3AdvancedSpriteGenerator:
         print("Prêt pour l'intégration dans Godot 4!")
 
 def main():
-    generator = HoMM3AdvancedSpriteGenerator()
+    import sys
+    output_dir = sys.argv[1] if len(sys.argv) > 1 else None
+    generator = HoMM3AdvancedSpriteGenerator(output_dir)
     generator.generate_all_assets()
 
 if __name__ == "__main__":

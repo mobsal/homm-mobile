@@ -3,7 +3,16 @@ extends Node
 # Singleton pour partager des données entre scènes
 
 var should_load_save: bool = false
-var player_name: String = "Héros"
+var hero_name: String = "Samurai"
+var difficulty: int = 0
+
+enum Difficulty { EASY, MEDIUM, HARD }
+
+var difficulty_labels: Dictionary = {
+	Difficulty.EASY: "Facile",
+	Difficulty.MEDIUM: "Moyen",
+	Difficulty.HARD: "Difficile",
+}
 
 # -------------------------------------------------
 # STRUCTURES DE JEU
@@ -42,7 +51,10 @@ var heroes: Array[Hero] = []
 var cities: Array[City] = []
 var buildings: Array[Building] = []
 
-# Example collection for creatures on tiles (from suggested edit)
+# Boss tracking
+var bosses_defeated: int = 0
+var unlocked_heroes: Array = []  # list of additional hero names/ids available in combat
+
 var creatures_on_tile: Dictionary = {}   # clé = Vector2i, valeur = Creature
 
 
@@ -59,21 +71,18 @@ enum SelectionMode { NONE, HERO, CITY, BUILDING, TILE }
 var current_mode: SelectionMode = SelectionMode.NONE
 
 # Signals
-signal selection_changed(mode, id, tile)   # emitted when the current selection changes
-signal turn_ended(counter, max)          # emitted when a turn finishes (used by the HUD)
-signal move_requested(hero, dest)        # emitted by UI when a move is requested (tap‑tap)
+signal selection_changed(mode, id, tile)
+signal turn_ended(counter, max)
+signal move_requested(hero, dest)
+signal hero_switch_requested(index)
 
 # Turn counter (displayed in DBI/DBT)
 var turn_counter: int = 0
-var max_turns: int = 30   # configurable from the options menu
+var max_turns: int = 30
 
 # Current selection details
-var current_id: int = -1          # id of the selected element
+var current_id: int = -1
 var current_tile: Vector2i = Vector2i.ZERO
-
-# ---------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------
 
 func set_selection(mode: SelectionMode, id: int = -1, tile: Vector2i = Vector2i.ZERO) -> void:
 	current_mode = mode
@@ -84,17 +93,17 @@ func set_selection(mode: SelectionMode, id: int = -1, tile: Vector2i = Vector2i.
 func end_turn() -> void:
 	turn_counter += 1
 	emit_signal("turn_ended", turn_counter, max_turns)
-	# Reset selection for the next turn
 	set_selection(SelectionMode.NONE)
 
 func save_game() -> void:
-	var file = FileAccess.open("user://save_game.json", FileAccess.WRITE)
+	var file = FileAccess.open("user://game_data_state.json", FileAccess.WRITE)
 	if file == null:
 		push_error("Impossible d'ouvrir le fichier de sauvegarde en écriture.")
 		return
 	var data = {
-		"player_name": player_name,
+		"player_name": hero_name,
 		"turn_counter": turn_counter,
+		"difficulty": difficulty,
 		"heroes": [],
 		"cities": [],
 		"buildings": [],
@@ -138,10 +147,10 @@ func save_game() -> void:
 
 
 func load_game() -> void:
-	if not FileAccess.file_exists("user://save_game.json"):
+	if not FileAccess.file_exists("user://game_data_state.json"):
 		push_warning("Aucune sauvegarde trouvée.")
 		return
-	var file = FileAccess.open("user://save_game.json", FileAccess.READ)
+	var file = FileAccess.open("user://game_data_state.json", FileAccess.READ)
 	if file == null:
 		push_error("Impossible d'ouvrir le fichier de sauvegarde en lecture.")
 		return
@@ -153,7 +162,8 @@ func load_game() -> void:
 		push_error("Erreur de parsing JSON de sauvegarde : %s" % result.error_string)
 		return
 	var data = result.result
-	player_name = data.get("player_name", "Héros")
+	hero_name = data.get("player_name", "Samurai")
+	difficulty = data.get("difficulty", 0)
 	heroes.clear()
 	for h_data in data.get("heroes", []):
 		var h = Hero.new()
@@ -195,19 +205,13 @@ func load_game() -> void:
 		creatures_on_tile[tile_pos] = creature
 
 func _ready() -> void:
-	# Charger la sauvegarde si demandée
 	if should_load_save:
 		load_game()
 	else:
-		# Initialisation d'une nouvelle partie (exemple simple)
-		player_name = "Héros"
 		heroes.clear()
 		cities.clear()
 		buildings.clear()
 		creatures_on_tile.clear()
-		# TODO: ajouter la logique de création du monde initial
 
-# Nettoyage lors de la fermeture du jeu
 func _exit_tree() -> void:
-	if should_load_save:
-		save_game()
+	save_game()

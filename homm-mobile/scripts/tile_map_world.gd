@@ -4,14 +4,14 @@ extends Node2D
 const TILE_SIZE: int = 64
 
 # Dimensions du monde (NOUVEAUX noms pour éviter le cache Godot)
-var _map_width: int = 60
-var _map_height: int = 40
-var _play_w: int = 60
-var _play_h: int = 40
+var _map_width: int = 120
+var _map_height: int = 80
+var _play_w: int = 120
+var _play_h: int = 80
 var _zx: int = 0
 var _zy: int = 0
-var _zex: int = 60
-var _zey: int = 40
+var _zex: int = 120
+var _zey: int = 80
 
 # Aliases pour compatibilité (propriétés dynamiques)
 var _world_w: int:
@@ -44,1467 +44,51 @@ var _label_ore: Label = null
 var _hero_tile: Vector2i = Vector2i.ZERO
 
 
-# ============================================================
-# GÉNÉRATEUR DE SPRITES PROCÉDURAUX PIXEL ART
-# ============================================================
-func _generate_sprite(type: String, size: int, variant_seed: int = -1) -> ImageTexture:
-	"""Génère un sprite pixel art détaillé procéduralement avec variante optionnelle"""
-	var img: Image = Image.create(size, size, false, Image.FORMAT_RGBA8)
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	if variant_seed >= 0:
-		rng.seed = variant_seed
-	else:
-		rng.randomize()
-	
-	# Fond transparent
-	img.fill(Color(0, 0, 0, 0))
-	
-	match type:
-		"castle":
-			_generate_castle_sprite(img, size, rng)
-		"house":
-			_generate_house_sprite(img, size, rng)
-		"mine_gold":
-			_generate_mine_sprite(img, size, rng, Color(0.9, 0.75, 0.1))
-		"mine_wood":
-			_generate_mine_sprite(img, size, rng, Color(0.5, 0.35, 0.2))
-		"mine_ore":
-			_generate_mine_sprite(img, size, rng, Color(0.6, 0.6, 0.65))
-		"tower":
-			_generate_tower_sprite(img, size, rng)
-		"tree":
-			_generate_tree_sprite(img, size, rng)
-		"rock":
-			_generate_rock_sprite(img, size, rng)
-		"chest":
-			_generate_chest_sprite(img, size, rng)
-		"enemy_skeleton":
-			_generate_enemy_sprite(img, size, rng, "skeleton")
-		"enemy_goblin":
-			_generate_enemy_sprite(img, size, rng, "goblin")
-		"enemy_archer":
-			_generate_enemy_sprite(img, size, rng, "archer")
-		"enemy_swordsman":
-			_generate_enemy_sprite(img, size, rng, "swordsman")
-		"enemy_tengu":
-			_generate_enemy_sprite(img, size, rng, "tengu")
-		"enemy_kappa":
-			_generate_enemy_sprite(img, size, rng, "kappa")
-		"enemy_ninja":
-			_generate_enemy_sprite(img, size, rng, "ninja")
-		"enemy_monk":
-			_generate_enemy_sprite(img, size, rng, "monk")
-		"hero":
-			_generate_hero_sprite(img, size, rng)
-		_:
-			# Fallback : cercle coloré
-			for x in range(size):
-				for y in range(size):
-					if (x - size/2)**2 + (y - size/2)**2 < (size/3)**2:
-						img.set_pixel(x, y, Color(0.5, 0.5, 0.5))
-	
-	# Ajouter un contour noir autour du sprite
-	_add_outline(img)
-
-	# Effet de lueur douce pour les éléments importants
-	if type in ["mine_gold", "mine_ore", "chest", "tower"]:
-		var glow_color = Color(0.9, 0.8, 0.3, 0.15) if type == "mine_gold" else Color(0.5, 0.5, 0.6, 0.12) if type == "mine_ore" else Color(0.85, 0.7, 0.2, 0.18) if type == "chest" else Color(0.3, 0.3, 0.35, 0.10)
-		for x in range(size):
-			for y in range(size):
-				if img.get_pixel(x, y).a > 0:
-					for dx in range(-2, 3):
-						for dy in range(-2, 3):
-							var nx = x + dx
-							var ny = y + dy
-							if nx >= 0 and nx < size and ny >= 0 and ny < size:
-								if img.get_pixel(nx, ny).a == 0:
-									var dist = sqrt(dx*dx + dy*dy)
-									var alpha = glow_color.a * (1.0 - dist / 3.0)
-									if alpha > 0:
-										var existing = img.get_pixel(nx, ny)
-										if existing.a == 0:
-											img.set_pixel(nx, ny, Color(glow_color.r, glow_color.g, glow_color.b, alpha))
-
-	return ImageTexture.create_from_image(img)
-
-func _draw_rect(img: Image, x: int, y: int, w: int, h: int, color: Color) -> void:
-	if w <= 0 or h <= 0:
-		return
-	var rx: int = max(x, 0)
-	var ry: int = max(y, 0)
-	var rw: int = min(w, img.get_width() - rx)
-	var rh: int = min(h, img.get_height() - ry)
-	if rw > 0 and rh > 0:
-		img.fill_rect(Rect2i(rx, ry, rw, rh), color)
-
-func _draw_pixel(img: Image, x: int, y: int, color: Color) -> void:
-	if x >= 0 and x < img.get_width() and y >= 0 and y < img.get_height():
-		img.set_pixel(x, y, color)
-
-func _draw_circle(img: Image, cx: int, cy: int, r: int, color: Color) -> void:
-	for x in range(-r, r + 1):
-		for y in range(-r, r + 1):
-			if x*x + y*y <= r*r:
-				_draw_pixel(img, cx + x, cy + y, color)
-
-func _draw_line(img: Image, x0: int, y0: int, x1: int, y1: int, color: Color, thickness: int = 1) -> void:
-	var dx: int = abs(x1 - x0)
-	var dy: int = abs(y1 - y0)
-	var sx: int = 1 if x0 < x1 else -1
-	var sy: int = 1 if y0 < y1 else -1
-	var err: int = dx - dy
-	while true:
-		for tx in range(-thickness/2, thickness/2 + 1):
-			for ty in range(-thickness/2, thickness/2 + 1):
-				_draw_pixel(img, x0 + tx, y0 + ty, color)
-		if x0 == x1 and y0 == y1:
-			break
-		var e2: int = 2 * err
-		if e2 > -dy:
-			err -= dy
-			x0 += sx
-		if e2 < dx:
-			err += dx
-			y0 += sy
-
-func _add_noise_to_rect(img: Image, x: int, y: int, w: int, h: int, base_color: Color, noise_amount: float, rng: RandomNumberGenerator) -> void:
-	for dx in range(w):
-		for dy in range(h):
-			var nx: int = x + dx
-			var ny: int = y + dy
-			if nx >= 0 and nx < img.get_width() and ny >= 0 and ny < img.get_height():
-				var noise: float = rng.randf_range(-noise_amount, noise_amount)
-				var c: Color = base_color
-				c.r = clamp(c.r + noise, 0, 1)
-				c.g = clamp(c.g + noise, 0, 1)
-				c.b = clamp(c.b + noise, 0, 1)
-				img.set_pixel(nx, ny, c)
-
-func _draw_gradient_rect(img: Image, x: int, y: int, w: int, h: int, top_color: Color, bottom_color: Color) -> void:
-	for dx in range(w):
-		for dy in range(h):
-			var nx: int = x + dx
-			var ny: int = y + dy
-			if nx >= 0 and nx < img.get_width() and ny >= 0 and ny < img.get_height():
-				var t: float = dy / max(1.0, float(h - 1))
-				img.set_pixel(nx, ny, top_color.lerp(bottom_color, t))
-
-func _draw_shaded_circle(img: Image, cx: int, cy: int, r: int, base_color: Color, highlight_dir: Vector2 = Vector2(-1, -1)) -> void:
-	var hr: float = highlight_dir.normalized().x
-	var hy: float = highlight_dir.normalized().y
-	for x in range(cx - r - 1, cx + r + 2):
-		for y in range(cy - r - 1, cy + r + 2):
-			var dx: float = float(x - cx) / max(1, r)
-			var dy: float = float(y - cy) / max(1, r)
-			var dist: float = sqrt(dx * dx + dy * dy)
-			if dist <= 1.0 and x >= 0 and x < img.get_width() and y >= 0 and y < img.get_height():
-				var shade: float = (dx * hr + dy * hy) * 0.25
-				var c: Color = base_color
-				c.r = clamp(c.r + shade, 0, 1)
-				c.g = clamp(c.g + shade, 0, 1)
-				c.b = clamp(c.b + shade, 0, 1)
-				var edge_alpha: float = 1.0 if dist < 0.85 else (1.0 - dist) / 0.15
-				c.a = clamp(edge_alpha, 0, 1)
-				img.set_pixel(x, y, c)
-
-func _draw_triangle(img: Image, x1: int, y1: int, x2: int, y2: int, x3: int, y3: int, color: Color) -> void:
-	var min_x: int = min(x1, min(x2, x3))
-	var max_x: int = max(x1, max(x2, x3))
-	var min_y: int = min(y1, min(y2, y3))
-	var max_y: int = max(y1, max(y2, y3))
-	for x in range(max(0, min_x), min(img.get_width(), max_x + 1)):
-		for y in range(max(0, min_y), min(img.get_height(), max_y + 1)):
-			var b1: float = float((y2 - y3) * (x - x3) + (x3 - x2) * (y - y3)) / float((y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3) + 0.001)
-			var b2: float = float((y3 - y1) * (x - x3) + (x1 - x3) * (y - y3)) / float((y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3) + 0.001)
-			var b3: float = 1.0 - b1 - b2
-			if b1 >= 0 and b2 >= 0 and b3 >= 0:
-				img.set_pixel(x, y, color)
-
-func _draw_vertical_gradient_rect(img: Image, x: int, y: int, w: int, h: int, left_color: Color, right_color: Color) -> void:
-	for dx in range(w):
-		for dy in range(h):
-			var nx: int = x + dx
-			var ny: int = y + dy
-			if nx >= 0 and nx < img.get_width() and ny >= 0 and ny < img.get_height():
-				var t: float = dx / max(1.0, float(w - 1))
-				img.set_pixel(nx, ny, left_color.lerp(right_color, t))
-
-func _draw_ramp(img: Image, x1: int, y1: int, w: int, h: int, top_w: int, color: Color) -> void:
-	var hw: int = w / 2
-	var thw: int = top_w / 2
-	for dy in range(h):
-		var t: float = dy / max(1.0, float(h - 1))
-		var cw: int = int(lerp(float(thw * 2), float(w), t))
-		var chw: int = cw / 2
-		var cx: int = x1 + hw - chw
-		for dx in range(cw):
-			var nx: int = cx + dx
-			var ny: int = y1 + dy
-			if nx >= 0 and nx < img.get_width() and ny >= 0 and ny < img.get_height():
-				img.set_pixel(nx, ny, color)
-
-func _add_bevel(img: Image, x: int, y: int, w: int, h: int, highlight: Color, shadow: Color) -> void:
-	for dx in range(w):
-		if x + dx >= 0 and x + dx < img.get_width():
-			if y >= 0 and y < img.get_height():
-				img.set_pixel(x + dx, y, highlight)
-			if y + h - 1 >= 0 and y + h - 1 < img.get_height():
-				img.set_pixel(x + dx, y + h - 1, shadow)
-	for dy in range(h):
-		if y + dy >= 0 and y + dy < img.get_height():
-			if x >= 0 and x < img.get_width():
-				img.set_pixel(x, y + dy, highlight)
-			if x + w - 1 >= 0 and x + w - 1 < img.get_width():
-				img.set_pixel(x + w - 1, y + dy, shadow)
-
-func _add_outline(img: Image, outline_color: Color = Color(0, 0, 0, 0.85), thickness: int = 1) -> void:
-	"""Ajoute un contour noir autour des pixels opaques de l'image"""
-	var w: int = img.get_width()
-	var h: int = img.get_height()
-	var outline_pixels: Array = []
-	for x in range(w):
-		for y in range(h):
-			if img.get_pixel(x, y).a > 0.1:
-				for ox in range(-thickness, thickness + 1):
-					for oy in range(-thickness, thickness + 1):
-						if ox == 0 and oy == 0:
-							continue
-						var nx: int = x + ox
-						var ny: int = y + oy
-						if nx >= 0 and nx < w and ny >= 0 and ny < h:
-							if img.get_pixel(nx, ny).a <= 0.1:
-								outline_pixels.append(Vector2i(nx, ny))
-	for p in outline_pixels:
-		img.set_pixel(p.x, p.y, outline_color)
-
-func _create_elliptical_shadow(parent: Node2D, width: int, height: int, y_offset: int, opacity: float = 0.35) -> void:
-	"""Crée une ombre elliptique réaliste sous un sprite"""
-	var shadow_texture: Image = Image.create(width, height, false, Image.FORMAT_RGBA8)
-	shadow_texture.fill(Color(0, 0, 0, 0))
-	
-	var hw: int = width / 2
-	var hh: int = height / 2
-	
-	# Dessiner une ellipse avec dégradé
-	for x in range(width):
-		for y in range(height):
-			# Normaliser les coordonnées (-1 à 1)
-			var nx: float = (x - hw) / float(hw)
-			var ny: float = (y - hh) / float(hh)
-			# Distance depuis le centre de l'ellipse
-			var dist: float = nx * nx + ny * ny
-			if dist <= 1.0:
-				# Alpha basé sur la distance (plus foncé au centre)
-				var alpha: float = opacity * (1.0 - dist * 0.5)
-				shadow_texture.set_pixel(x, y, Color(0, 0, 0, alpha))
-	
-	var shadow_sprite: Sprite2D = Sprite2D.new()
-	shadow_sprite.texture = ImageTexture.create_from_image(shadow_texture)
-	shadow_sprite.position = Vector2(0, y_offset)
-	shadow_sprite.set_z_index(-1)
-	parent.add_child(shadow_sprite)
-
-# --- CHÂTEAU JAPONAIS 192x192 (Shiro) ---
-func _generate_castle_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
-	var s: int = size
-	var hs: int = s / 2
-	
-	# === 1. OMBRE AU SOL ===
-	_draw_rect(img, 10, s - 12, s - 20, 12, Color(0, 0, 0, 0.30))
-	
-	# === 2. FONDATION EN PIERRE (ishigaki) ===
-	_draw_rect(img, 8, hs + 8, s - 16, hs - 12, Color(0.45, 0.42, 0.40))
-	_add_noise_to_rect(img, 8, hs + 8, s - 16, hs - 12, Color(0.45, 0.42, 0.40), 0.04, rng)
-	# Lignes de maçonnerie
-	for fy in range(hs + 16, s - 8, 8):
-		_draw_rect(img, 8, fy, s - 16, 1, Color(0.35, 0.32, 0.30))
-	
-	# === 3. MURS BLANCS (shirokabe) avec bois noir ===
-	var wall_base: int = hs - 40
-	var wall_h: int = 60
-	# Mur principal blanc
-	_add_noise_to_rect(img, hs - 50, wall_base, 100, wall_h, Color(0.92, 0.90, 0.85), 0.02, rng)
-	# Poutres en bois noir (horizontal)
-	for py in [wall_base + 8, wall_base + 24, wall_base + 40]:
-		_draw_rect(img, hs - 52, py, 104, 3, Color(0.12, 0.08, 0.06))
-	# Poutres verticales
-	for px in [hs - 40, hs - 20, hs, hs + 20, hs + 40]:
-		_draw_rect(img, px, wall_base, 3, wall_h, Color(0.12, 0.08, 0.06))
-	
-	# === 4. TOIT COURBÉ IRIMOYA (niveaux superposés) ===
-	# Premier niveau (toit inférieur)
-	for level in range(4):
-		var roof_y: int = wall_base - 10 - (level * 22)
-		var roof_w: int = 110 - (level * 18)
-		var roof_x: int = hs - roof_w / 2
-		
-		# Couche de tuiles sombres
-		for ty in range(12):
-			var tw: int = roof_w - abs(ty - 6) * 2
-			var tx: int = hs - tw / 2
-			var shade: float = 0.18 + ty * 0.015
-			_draw_rect(img, tx, roof_y - ty, tw, 2, Color(shade, shade * 0.12, shade * 0.08))
-		
-		# Bordure du toit (kawara)
-		_draw_rect(img, roof_x - 2, roof_y + 10, roof_w + 4, 3, Color(0.20, 0.12, 0.08))
-		# Extrémités courbées
-		_draw_circle(img, roof_x - 4, roof_y + 8, 4, Color(0.18, 0.10, 0.06))
-		_draw_circle(img, roof_x + roof_w + 4, roof_y + 8, 4, Color(0.18, 0.10, 0.06))
-	
-	# === 5. DONJON CENTRAL (tenshu) ===
-	var tenshu_x: int = hs - 20
-	var tenshu_y: int = wall_base - 100
-	var tenshu_w: int = 40
-	var tenshu_h: int = 50
-	
-	# Mur blanc du tenshu
-	_add_noise_to_rect(img, tenshu_x, tenshu_y, tenshu_w, tenshu_h, Color(0.92, 0.90, 0.85), 0.02, rng)
-	# Poutres horizontales
-	for py in [tenshu_y + 8, tenshu_y + 24, tenshu_y + 40]:
-		_draw_rect(img, tenshu_x - 2, py, tenshu_w + 4, 3, Color(0.12, 0.08, 0.06))
-	# Poutres verticales
-	for px in [tenshu_x + 8, tenshu_x + 20, tenshu_x + 32]:
-		_draw_rect(img, px, tenshu_y, 3, tenshu_h, Color(0.12, 0.08, 0.06))
-	
-	# Toit du tenshu (courbé)
-	for ty in range(14):
-		var tw: int = tenshu_w + 8 - abs(ty - 7) * 2
-		var tx: int = hs - tw / 2
-		var shade: float = 0.18 + ty * 0.015
-		_draw_rect(img, tx, tenshu_y - 14 - ty, tw, 2, Color(shade, shade * 0.12, shade * 0.08))
-	
-	# === 6. FENÊTRES JAPONAISES (shoji) ===
-	var window_positions: Array = [
-		Vector2(hs - 35, wall_base + 12), Vector2(hs - 15, wall_base + 12), Vector2(hs + 5, wall_base + 12), Vector2(hs + 25, wall_base + 12),
-		Vector2(hs - 35, wall_base + 32), Vector2(hs - 15, wall_base + 32), Vector2(hs + 5, wall_base + 32), Vector2(hs + 25, wall_base + 32)
-	]
-	for wp in window_positions:
-		var wx: int = int(wp.x)
-		var wy: int = int(wp.y)
-		# Cadre en bois noir
-		_draw_rect(img, wx - 5, wy - 5, 14, 14, Color(0.12, 0.08, 0.06))
-		# Papier shoji (blanc translucide)
-		_draw_rect(img, wx - 3, wy - 3, 10, 10, Color(0.95, 0.93, 0.88))
-		# Grille en bois
-		_draw_rect(img, wx, wy - 3, 1, 10, Color(0.12, 0.08, 0.06))
-		_draw_rect(img, wx - 3, wy, 10, 1, Color(0.12, 0.08, 0.06))
-	
-	# === 7. PORTE PRINCIPALE (ōtemon) ===
-	var gate_w: int = 28
-	var gate_h: int = 24
-	var gate_x: int = hs - gate_w / 2
-	var gate_y: int = hs + 12
-	
-	# Piliers en bois
-	_draw_rect(img, gate_x - 4, gate_y - 8, 6, gate_h + 8, Color(0.12, 0.08, 0.06))
-	_draw_rect(img, gate_x + gate_w - 2, gate_y - 8, 6, gate_h + 8, Color(0.12, 0.08, 0.06))
-	# Linteau
-	_draw_rect(img, gate_x - 6, gate_y - 12, gate_w + 12, 6, Color(0.12, 0.08, 0.06))
-	# Porte en bois
-	_add_noise_to_rect(img, gate_x + 2, gate_y, gate_w - 4, gate_h, Color(0.18, 0.12, 0.06), 0.03, rng)
-	# Panneaux de la porte
-	_draw_rect(img, gate_x + 2, gate_y, gate_w / 2 - 2, gate_h, Color(0.15, 0.10, 0.05))
-	# Poignées en métal
-	_draw_rect(img, gate_x + gate_w / 2 - 2, gate_y + 10, 4, 4, Color(0.65, 0.55, 0.45))
-	
-	# === 8. TORII (porte shintoïste) ===
-	var torii_x: int = hs + 55
-	var torii_y: int = hs + 4
-	# Piliers rouges (vermilion)
-	_draw_rect(img, torii_x, torii_y - 20, 4, 28, Color(0.85, 0.25, 0.25))
-	_draw_rect(img, torii_x + 14, torii_y - 20, 4, 28, Color(0.85, 0.25, 0.25))
-	# Linteau supérieur (kasagi) courbé
-	for tx in range(torii_x - 4, torii_x + 22):
-		var curve: int = 2 if tx < torii_x + 2 or tx > torii_x + 16 else 0
-		_draw_rect(img, tx, torii_y - 24 - curve, 2, 6, Color(0.85, 0.25, 0.25))
-	# Linteau inférieur (nuki)
-	_draw_rect(img, torii_x - 2, torii_y - 8, 22, 3, Color(0.85, 0.25, 0.25))
-	
-	# === 9. BANNIÈRE (nobori) ===
-	var banner_x: int = hs - 60
-	var banner_y: int = wall_base - 60
-	# Poteau
-	_draw_rect(img, banner_x, banner_y - 30, 3, 50, Color(0.45, 0.35, 0.25))
-	# Drapeau rouge avec cercle du soleil
-	for i in range(20):
-		var wv: int = 2 if i % 2 == 0 else 0
-		_draw_rect(img, banner_x + 4 + wv, banner_y - 28 + i, 18, 2, Color(0.85, 0.25, 0.25))
-	# Cercle du soleil (hinomaru)
-	_draw_circle(img, banner_x + 13, banner_y - 18, 5, Color(0.95, 0.85, 0.20))
-	
-	# === 10. SAKURA (cerisiers en fleurs) ===
-	for tree in [[hs - 55, hs + 20], [hs + 55, hs + 18]]:
-		var tx: int = tree[0]
-		var ty: int = tree[1]
-		# Tronc
-		_draw_rect(img, tx, ty - 20, 6, 24, Color(0.35, 0.22, 0.12))
-		# Branches
-		_draw_rect(img, tx - 8, ty - 28, 12, 4, Color(0.32, 0.20, 0.10))
-		_draw_rect(img, tx + 4, ty - 32, 10, 4, Color(0.32, 0.20, 0.10))
-		# Fleurs de sakura (rose pâle)
-		for fx in range(tx - 12, tx + 14, 4):
-			for fy in range(ty - 36, ty - 20, 4):
-				if rng.randf() < 0.6:
-					var petal_color: Color = Color(0.95, 0.75, 0.85) if rng.randf() < 0.5 else Color(0.90, 0.65, 0.78)
-					_draw_circle(img, fx, fy, 3, petal_color)
-	
-	# === 11. JARDIN ZEN (gauche) ===
-	var zen_x: int = hs - 65
-	var zen_y: int = hs + 10
-	# Sol de gravier
-	_draw_rect(img, zen_x, zen_y, 20, 16, Color(0.65, 0.60, 0.55))
-	_add_noise_to_rect(img, zen_x, zen_y, 20, 16, Color(0.65, 0.60, 0.55), 0.03, rng)
-	# Pierres zen
-	_draw_circle(img, zen_x + 5, zen_y + 8, 4, Color(0.45, 0.42, 0.40))
-	_draw_circle(img, zen_x + 14, zen_y + 5, 3, Color(0.48, 0.45, 0.43))
-	# Bambou
-	for bx in [zen_x + 8, zen_x + 16]:
-		_draw_rect(img, bx, zen_y - 8, 2, 18, Color(0.25, 0.45, 0.30))
-		_draw_rect(img, bx, zen_y - 10, 2, 2, Color(0.30, 0.50, 0.35))
-
-
-# --- MAISON JAPONAISE (Minka) ---
-func _generate_house_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
-	var s: int = size
-	var hs: int = s / 2
-	
-	# Sol de terre battue
-	_draw_rect(img, 6, hs + 8, s - 12, hs - 10, Color(0.55, 0.45, 0.35))
-	_add_noise_to_rect(img, 6, hs + 8, s - 12, hs - 10, Color(0.55, 0.45, 0.35), 0.03, rng)
-	
-	# Mur principal (bois sombre avec papier shoji)
-	_add_noise_to_rect(img, hs - 18, hs - 6, 36, 24, Color(0.35, 0.25, 0.18), 0.04, rng)
-	
-	# Poutres de bois (verticales)
-	for px in [hs - 14, hs - 6, hs + 2, hs + 10, hs + 18]:
-		_draw_rect(img, px, hs - 6, 3, 24, Color(0.12, 0.08, 0.06))
-	
-	# Poutres horizontales
-	for py in [hs + 2, hs + 12]:
-		_draw_rect(img, hs - 18, py, 36, 2, Color(0.12, 0.08, 0.06))
-	
-	# Fenêtre shoji (papier translucide)
-	_draw_rect(img, hs - 8, hs - 2, 8, 10, Color(0.95, 0.93, 0.88))
-	# Grille en bois
-	_draw_rect(img, hs - 4, hs - 2, 1, 10, Color(0.12, 0.08, 0.06))
-	_draw_rect(img, hs - 8, hs + 2, 8, 1, Color(0.12, 0.08, 0.06))
-	_draw_rect(img, hs, hs - 2, 1, 10, Color(0.12, 0.08, 0.06))
-	
-	# Toit courbé irimoya (tuiles sombres)
-	for ty in range(16):
-		var tw: int = 38 - abs(ty - 8) * 2
-		var tx: int = hs - tw / 2
-		var shade: float = 0.18 + ty * 0.012
-		_draw_rect(img, tx, hs - 20 - ty, tw, 2, Color(shade, shade * 0.12, shade * 0.08))
-	
-	# Bordure du toit (kawara)
-	_draw_rect(img, hs - 20, hs - 6, 40, 3, Color(0.20, 0.12, 0.08))
-	# Extrémités courbées
-	_draw_circle(img, hs - 22, hs - 8, 4, Color(0.18, 0.10, 0.06))
-	_draw_circle(img, hs + 22, hs - 8, 4, Color(0.18, 0.10, 0.06))
-	
-	# Porte coulissante (shoji)
-	_draw_rect(img, hs + 8, hs + 4, 8, 14, Color(0.95, 0.93, 0.88))
-	_draw_rect(img, hs + 10, hs + 4, 1, 14, Color(0.12, 0.08, 0.06))
-	_draw_rect(img, hs + 8, hs + 8, 8, 1, Color(0.12, 0.08, 0.06))
-	_draw_rect(img, hs + 8, hs + 12, 8, 1, Color(0.12, 0.08, 0.06))
-	
-	# Ombre
-	_draw_rect(img, 10, s - 5, s - 20, 3, Color(0, 0, 0, 0.25))
-
-# --- MINE 96x96 MEGA DÉTAILLÉE ---
-func _generate_mine_sprite(img: Image, size: int, rng: RandomNumberGenerator, accent_color: Color) -> void:
-	var s: int = size
-	var hs: int = s / 2
-	
-	# Ombre large
-	_draw_rect(img, 8, s - 8, s - 16, 8, Color(0, 0, 0, 0.25))
-	
-	# Sol terreux avec cailloux
-	_draw_rect(img, 6, hs + 10, s - 12, hs - 14, Color(0.40, 0.33, 0.26))
-	for _i in range(8):
-		var cx: int = rng.randi_range(6, s - 10)
-		var cy: int = rng.randi_range(hs + 12, s - 10)
-		_draw_rect(img, cx, cy, 3, 2, Color(0.48, 0.42, 0.35))
-	
-	# Entrée tunnel (beaucoup plus profonde)
-	_draw_rect(img, hs - 22, hs - 12, 44, 36, Color(0.06, 0.04, 0.03))
-	_draw_rect(img, hs - 18, hs - 8, 36, 28, Color(0.04, 0.03, 0.02))
-	_draw_rect(img, hs - 14, hs - 4, 28, 20, Color(0.03, 0.02, 0.01))
-	
-	# Cadre bois massif (poutres verticales triples)
-	for px in [hs - 24, hs - 18, hs + 18, hs + 24]:
-		_draw_rect(img, px, hs - 14, 6, 38, Color(0.32, 0.20, 0.12))
-		# Clous
-		for cy in range(hs - 10, hs + 18, 6):
-			_draw_rect(img, px + 2, cy, 2, 2, Color(0.55, 0.50, 0.40))
-	# Traverse supérieure épaisse
-	_draw_rect(img, hs - 28, hs - 16, 56, 8, Color(0.38, 0.24, 0.14))
-	_draw_rect(img, hs - 26, hs - 18, 52, 4, Color(0.32, 0.20, 0.10))
-	# Traverse inférieure
-	_draw_rect(img, hs - 28, hs + 16, 56, 6, Color(0.38, 0.24, 0.14))
-	
-	# Étaiements diagonaux
-	_draw_line(img, hs - 24, hs + 18, hs - 14, hs - 12, Color(0.30, 0.18, 0.10), 2)
-	_draw_line(img, hs + 24, hs + 18, hs + 14, hs - 12, Color(0.30, 0.18, 0.10), 2)
-	
-	# Rails de mine avec traverses détaillées
-	_draw_rect(img, hs - 14, hs + 4, 4, 26, Color(0.32, 0.32, 0.36))
-	_draw_rect(img, hs + 10, hs + 4, 4, 26, Color(0.32, 0.32, 0.36))
-	for ry in range(hs + 6, hs + 26, 5):
-		_draw_rect(img, hs - 16, ry, 40, 3, Color(0.24, 0.14, 0.08))
-		_draw_rect(img, hs - 14, ry + 1, 36, 1, Color(0.20, 0.10, 0.05))
-	# Boulons sur les rails
-	for rx in [hs - 13, hs + 11]:
-		for ry in [hs + 8, hs + 18]:
-			_draw_rect(img, rx, ry, 2, 2, Color(0.50, 0.50, 0.55))
-	
-	# Chariot de mine sur rails
-	_draw_rect(img, hs - 10, hs + 14, 20, 12, Color(0.28, 0.18, 0.10))
-	_draw_rect(img, hs - 8, hs + 12, 16, 4, Color(0.32, 0.20, 0.12))
-	# Roues
-	_draw_rect(img, hs - 8, hs + 26, 4, 4, Color(0.22, 0.14, 0.08))
-	_draw_rect(img, hs + 4, hs + 26, 4, 4, Color(0.22, 0.14, 0.08))
-	# Minerai dans le chariot
-	for _i in range(6):
-		var ox: int = rng.randi_range(hs - 8, hs + 6)
-		var oy: int = rng.randi_range(hs + 10, hs + 14)
-		_draw_rect(img, ox, oy, 3, 3, accent_color)
-	
-	# Filons de minerai (20 filons)
-	for _i in range(20):
-		var fx: int = rng.randi_range(hs - 16, hs + 16)
-		var fy: int = rng.randi_range(hs - 8, hs + 14)
-		_draw_rect(img, fx, fy, 4, 3, accent_color)
-	# Scintillement blanc/or
-	for sx in [hs - 12, hs - 6, hs + 4, hs + 10, hs + 14]:
-		for sy in [hs - 4, hs + 2, hs + 8]:
-			if rng.randf() < 0.5:
-				_draw_rect(img, sx, sy, 2, 2, Color(1.0, 1.0, 0.9))
-	
-	# Panneau d'avertissement (gros avec croix)
-	_draw_rect(img, hs - 30, hs - 20, 14, 12, Color(0.62, 0.52, 0.12))
-	_draw_rect(img, hs - 28, hs - 18, 10, 8, Color(0.12, 0.08, 0.03))
-	# Croix X rouge
-	_draw_line(img, hs - 26, hs - 16, hs - 20, hs - 12, Color(0.75, 0.10, 0.10), 2)
-	_draw_line(img, hs - 20, hs - 16, hs - 26, hs - 12, Color(0.75, 0.10, 0.10), 2)
-	# Piquet
-	_draw_rect(img, hs - 24, hs - 8, 2, 12, Color(0.35, 0.22, 0.12))
-	
-	# Lanterne suspendue
-	_draw_rect(img, hs + 18, hs - 18, 2, 10, Color(0.25, 0.20, 0.15))
-	_draw_rect(img, hs + 16, hs - 8, 6, 8, Color(0.55, 0.55, 0.60))
-	_draw_rect(img, hs + 17, hs - 6, 4, 4, Color(0.90, 0.75, 0.20))
-	
-	# Câbles suspendus
-	_draw_line(img, hs - 20, hs - 18, hs + 20, hs - 14, Color(0.15, 0.12, 0.08), 1)
-	
-	# Outils à droite
-	# Pioche (plus détaillée)
-	_draw_rect(img, hs + 30, hs - 4, 3, 22, Color(0.42, 0.26, 0.14))
-	_draw_rect(img, hs + 26, hs - 10, 11, 6, Color(0.55, 0.55, 0.60))
-	_draw_rect(img, hs + 28, hs - 12, 7, 2, Color(0.65, 0.65, 0.70))
-	# Seau avec anse
-	_draw_rect(img, hs + 34, hs + 8, 10, 12, Color(0.48, 0.34, 0.22))
-	_draw_rect(img, hs + 36, hs + 6, 6, 2, Color(0.40, 0.30, 0.20))
-	# Pelle
-	_draw_rect(img, hs + 38, hs + 2, 3, 16, Color(0.35, 0.22, 0.12))
-	_draw_rect(img, hs + 36, hs - 2, 7, 4, Color(0.55, 0.55, 0.60))
-	
-	# Barils à gauche (3 barils)
-	for bx in [hs - 34, hs - 28, hs - 30]:
-		_draw_rect(img, bx, hs + 2, 8, 12, Color(0.48, 0.30, 0.18))
-		_draw_rect(img, bx, hs + 4, 8, 2, Color(0.38, 0.22, 0.12))
-		_draw_rect(img, bx, hs + 10, 8, 2, Color(0.38, 0.22, 0.12))
-	
-	# Herbe sèche et cailloux
-	_draw_rect(img, 8, hs + 20, 4, 5, Color(0.32, 0.40, 0.16))
-	_draw_rect(img, s - 14, hs + 18, 4, 5, Color(0.32, 0.40, 0.16))
-	_draw_rect(img, 12, hs + 24, 3, 3, Color(0.45, 0.40, 0.35))
-	_draw_rect(img, s - 18, hs + 22, 3, 3, Color(0.45, 0.40, 0.35))
-
-# --- TOUR 96x96 MEGA DÉTAILLÉE ---
-func _generate_tower_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
-	var s: int = size
-	var hs: int = s / 2
-	
-	# Ombre large
-	_draw_rect(img, 8, s - 8, s - 16, 8, Color(0, 0, 0, 0.28))
-	
-	# Base rocheuse (plus large et texturée)
-	_draw_circle(img, hs, hs + 16, 24, Color(0.38, 0.36, 0.32))
-	_draw_circle(img, hs - 6, hs + 14, 14, Color(0.42, 0.40, 0.36))
-	_draw_circle(img, hs + 8, hs + 18, 12, Color(0.44, 0.42, 0.38))
-	
-	# Socle pierre de la tour
-	_draw_rect(img, hs - 18, hs + 12, 36, 10, Color(0.32, 0.30, 0.28))
-	
-	# Corps de tour (34×64)
-	var tw: int = 34
-	var th: int = 64
-	var tx: int = hs - tw / 2
-	var ty: int = hs - 24
-	_add_noise_to_rect(img, tx, ty, tw, th, Color(0.44, 0.42, 0.39), 0.06, rng)
-	# Joints horizontaux (tous les 8px)
-	for jy in range(ty + 10, ty + th, 8):
-		_draw_rect(img, tx, jy, tw, 2, Color(0.36, 0.34, 0.31))
-	# Joints verticaux (maçonnerie)
-	for jx in [tx + 8, tx + 17, tx + 26]:
-		_draw_rect(img, jx, ty, 2, th, Color(0.36, 0.34, 0.31))
-	
-	# Meurtrières (4 meurtrières de chaque côté)
-	for mry in [ty + 16, ty + 28, ty + 40, ty + 52]:
-		_draw_rect(img, tx + 3, mry, 4, 6, Color(0.10, 0.08, 0.06))
-		_draw_rect(img, tx + tw - 7, mry, 4, 6, Color(0.10, 0.08, 0.06))
-	
-	# Créneaux (7 créneaux)
-	for cx in [tx + 3, tx + 8, tx + 13, tx + 18, tx + 23, tx + 28, tx + 31]:
-		_draw_rect(img, cx, ty - 8, 4, 10, Color(0.46, 0.44, 0.41))
-	# Bandeau sous créneaux
-	_draw_rect(img, tx, ty - 4, tw, 4, Color(0.40, 0.38, 0.35))
-	
-	# Toit conique (7 niveaux, plus haut)
-	_draw_rect(img, tx - 4, ty - 14, tw + 8, 14, Color(0.48, 0.14, 0.04))
-	_draw_rect(img, tx - 2, ty - 26, tw + 4, 14, Color(0.54, 0.18, 0.06))
-	_draw_rect(img, tx + 2, ty - 38, tw - 4, 14, Color(0.60, 0.22, 0.08))
-	_draw_rect(img, tx + 6, ty - 48, tw - 12, 12, Color(0.66, 0.26, 0.10))
-	_draw_rect(img, tx + 10, ty - 56, tw - 20, 10, Color(0.72, 0.30, 0.12))
-	_draw_rect(img, tx + 13, ty - 62, tw - 26, 8, Color(0.76, 0.34, 0.14))
-	_draw_rect(img, tx + 15, ty - 68, 4, 6, Color(0.88, 0.72, 0.18))
-	# Flèche au sommet
-	_draw_rect(img, hs - 1, ty - 74, 2, 6, Color(0.55, 0.45, 0.35))
-	
-	# Fenêtres (3 fenêtres avec lumière bleutée - tour abandonnée)
-	for wx in [hs - 10, hs + 2, hs - 10]:
-		var wy: int = ty + 16 if wx == hs - 10 else ty + 32
-		if wx == hs + 2:
-			wy = ty + 44
-		# Encadrement
-		_draw_rect(img, wx - 1, wy - 1, 8, 2, Color(0.38, 0.36, 0.33))
-		_draw_rect(img, wx - 1, wy + 12, 8, 2, Color(0.38, 0.36, 0.33))
-		_draw_rect(img, wx - 1, wy, 2, 12, Color(0.38, 0.36, 0.33))
-		_draw_rect(img, wx + 5, wy, 2, 12, Color(0.38, 0.36, 0.33))
-		# Intérieur
-		_draw_rect(img, wx, wy, 6, 12, Color(0.10, 0.12, 0.16))
-		# Lumière faible (abandonnée)
-		_draw_rect(img, wx + 1, wy + 1, 4, 10, Color(0.18, 0.22, 0.30))
-		_draw_rect(img, wx + 2, wy + 2, 2, 8, Color(0.25, 0.30, 0.38))
-	
-	# Porte bas (grande porte en bois avec ferrures)
-	_draw_rect(img, hs - 7, hs + 18, 14, 18, Color(0.18, 0.10, 0.04))
-	# Planches verticales
-	for px in [hs - 5, hs - 1, hs + 3]:
-		_draw_rect(img, px, hs + 18, 2, 18, Color(0.14, 0.08, 0.02))
-	# Ferrures (bandes horizontales)
-	_draw_rect(img, hs - 6, hs + 22, 12, 2, Color(0.52, 0.50, 0.48))
-	_draw_rect(img, hs - 6, hs + 30, 12, 2, Color(0.52, 0.50, 0.48))
-	# Serrure
-	_draw_rect(img, hs - 2, hs + 26, 4, 6, Color(0.55, 0.53, 0.48))
-	_draw_rect(img, hs - 1, hs + 28, 2, 2, Color(0.25, 0.23, 0.18))
-	# Poignée
-	_draw_rect(img, hs + 3, hs + 26, 3, 3, Color(0.58, 0.55, 0.50))
-	
-	# Vigne/mousse luxuriante sur le côté droit
-	for vy in range(ty + 8, ty + th - 4, 4):
-		var vx: int = tx + tw - rng.randi_range(2, 6)
-		var vw: int = rng.randi_range(3, 6)
-		_draw_rect(img, vx, vy, vw, 3, Color(0.20, 0.36, 0.12))
-	# Tiges
-	_draw_rect(img, tx + tw - 3, ty + 10, 2, th - 16, Color(0.28, 0.42, 0.18))
-	_draw_rect(img, tx + tw - 6, ty + 20, 2, th - 30, Color(0.25, 0.38, 0.14))
-	# Feuilles de vigne en grappes
-	for vy in [ty + 14, ty + 28, ty + 42, ty + 54]:
-		_draw_circle(img, tx + tw - 2, vy, 3, Color(0.22, 0.40, 0.12))
-	
-	# Écailles/brèches sur la pierre (signes d'abandon)
-	_draw_rect(img, tx + 4, ty + 30, 5, 4, Color(0.35, 0.33, 0.30))
-	_draw_rect(img, tx + 12, ty + 38, 4, 3, Color(0.38, 0.36, 0.32))
-	_draw_rect(img, tx + 20, ty + 24, 3, 5, Color(0.32, 0.30, 0.28))
-	
-	# Herbe sèche et buissons autour
-	_draw_circle(img, 10, hs + 22, 5, Color(0.38, 0.44, 0.18))
-	_draw_circle(img, s - 12, hs + 20, 4, Color(0.35, 0.42, 0.16))
-	_draw_circle(img, 18, hs + 26, 3, Color(0.42, 0.48, 0.20))
-	# Petit caillou
-	_draw_circle(img, hs + 22, hs + 28, 3, Color(0.50, 0.50, 0.54))
-	# Fleur sauvage
-	_draw_rect(img, hs + 18, hs + 24, 2, 2, Color(0.80, 0.20, 0.25))
-	_draw_rect(img, hs + 19, hs + 26, 2, 3, Color(0.20, 0.40, 0.10))
-
-# --- ARBRE 96x96 MEGA DÉTAILLÉ ---
-func _generate_tree_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
-	var s: int = size
-	var hs: int = s / 2
-	
-	# Ombre large
-	_draw_rect(img, 14, s - 8, s - 28, 8, Color(0, 0, 0, 0.22))
-	
-	# Tronc (beaucoup plus épais avec texture de bark)
-	_add_noise_to_rect(img, hs - 8, hs + 6, 16, 36, Color(0.30, 0.18, 0.08), 0.05, rng)
-	# Bark lines verticales
-	for bx in [hs - 6, hs - 2, hs + 2, hs + 6]:
-		_draw_rect(img, bx, hs + 8, 2, 32, Color(0.26, 0.15, 0.06))
-	# Nœuds sur le tronc (plus nombreux)
-	_draw_rect(img, hs - 6, hs + 12, 4, 4, Color(0.25, 0.14, 0.06))
-	_draw_rect(img, hs + 2, hs + 22, 4, 4, Color(0.25, 0.14, 0.06))
-	_draw_rect(img, hs - 5, hs + 30, 3, 5, Color(0.27, 0.16, 0.07))
-	_draw_rect(img, hs + 3, hs + 16, 3, 3, Color(0.24, 0.13, 0.05))
-	# Champignon sur tronc
-	_draw_rect(img, hs + 8, hs + 18, 4, 3, Color(0.65, 0.15, 0.15))
-	_draw_rect(img, hs + 9, hs + 21, 2, 3, Color(0.35, 0.28, 0.20))
-	# Mousse sur le tronc
-	for mry in [hs + 10, hs + 20, hs + 30]:
-		_draw_rect(img, hs - 10, mry, 4, 3, Color(0.20, 0.36, 0.10))
-	
-	# Branches (plus nombreuses et détaillées)
-	# Branche gauche bas
-	_draw_rect(img, hs - 22, hs - 2, 16, 5, Color(0.28, 0.16, 0.08))
-	_draw_rect(img, hs - 20, hs - 4, 12, 3, Color(0.26, 0.14, 0.06))
-	# Branche droite bas
-	_draw_rect(img, hs + 8, hs - 8, 18, 5, Color(0.28, 0.16, 0.08))
-	_draw_rect(img, hs + 10, hs - 10, 14, 3, Color(0.26, 0.14, 0.06))
-	# Branche gauche haut
-	_draw_rect(img, hs - 18, hs - 14, 12, 4, Color(0.26, 0.15, 0.07))
-	# Branche droite haut
-	_draw_rect(img, hs + 6, hs - 18, 14, 4, Color(0.26, 0.15, 0.07))
-	# Branche centrale
-	_draw_rect(img, hs - 2, hs - 26, 4, 10, Color(0.27, 0.16, 0.08))
-	
-	# Feuillage en multiples couches (cercles plus grands et variés)
-	# Couche 1 (fond sombre)
-	_draw_circle(img, hs, hs - 18, 34, Color(0.08, 0.24, 0.04))
-	_draw_circle(img, hs - 10, hs - 26, 26, Color(0.09, 0.26, 0.05))
-	_draw_circle(img, hs + 12, hs - 24, 24, Color(0.09, 0.26, 0.05))
-	_draw_circle(img, hs - 6, hs - 34, 20, Color(0.10, 0.28, 0.06))
-	# Couche 2 (moyen)
-	_draw_circle(img, hs, hs - 22, 30, Color(0.11, 0.32, 0.06))
-	_draw_circle(img, hs - 8, hs - 30, 22, Color(0.12, 0.34, 0.07))
-	_draw_circle(img, hs + 10, hs - 28, 20, Color(0.12, 0.34, 0.07))
-	_draw_circle(img, hs, hs - 38, 16, Color(0.14, 0.38, 0.08))
-	# Couche 3 (clair)
-	_draw_circle(img, hs, hs - 26, 26, Color(0.15, 0.40, 0.09))
-	_draw_circle(img, hs - 6, hs - 36, 18, Color(0.16, 0.42, 0.10))
-	_draw_circle(img, hs + 6, hs - 40, 14, Color(0.18, 0.44, 0.11))
-	_draw_circle(img, hs - 2, hs - 44, 10, Color(0.20, 0.46, 0.12))
-	# Highlight (éclat)
-	_draw_circle(img, hs + 10, hs - 38, 8, Color(0.24, 0.50, 0.16))
-	_draw_circle(img, hs - 4, hs - 42, 6, Color(0.26, 0.52, 0.18))
-	# Grappes de feuilles
-	_draw_circle(img, hs + 14, hs - 16, 8, Color(0.12, 0.36, 0.08))
-	_draw_circle(img, hs - 14, hs - 20, 8, Color(0.12, 0.36, 0.08))
-	_draw_circle(img, hs + 8, hs - 48, 6, Color(0.18, 0.44, 0.12))
-	
-	# Nid d'oiseau (petit dans une branche)
-	_draw_rect(img, hs + 10, hs - 22, 6, 4, Color(0.42, 0.32, 0.20))
-	_draw_rect(img, hs + 11, hs - 23, 4, 2, Color(0.35, 0.25, 0.15))
-	# Petit oiseau
-	_draw_rect(img, hs + 8, hs - 26, 3, 2, Color(0.55, 0.20, 0.15))
-	
-	# Pommes/fruits (petits points rouges)
-	for fx in [hs - 8, hs + 6, hs - 2, hs + 10]:
-		var fy: int = rng.randi_range(hs - 18, hs - 8)
-		_draw_rect(img, fx, fy, 2, 2, Color(0.75, 0.12, 0.12))
-	
-	# Racines visibles (plus nombreuses)
-	_draw_rect(img, hs - 12, hs + 30, 8, 5, Color(0.26, 0.16, 0.08))
-	_draw_rect(img, hs + 4, hs + 30, 8, 5, Color(0.26, 0.16, 0.08))
-	_draw_rect(img, hs - 16, hs + 32, 6, 4, Color(0.24, 0.14, 0.07))
-	_draw_rect(img, hs + 10, hs + 32, 6, 4, Color(0.24, 0.14, 0.07))
-	_draw_rect(img, hs - 18, hs + 34, 4, 3, Color(0.22, 0.13, 0.06))
-	
-	# Herbe et fleurs au pied
-	_draw_circle(img, hs - 20, hs + 34, 5, Color(0.18, 0.38, 0.10))
-	_draw_circle(img, hs + 18, hs + 34, 4, Color(0.18, 0.38, 0.10))
-	_draw_circle(img, hs - 14, hs + 38, 3, Color(0.22, 0.42, 0.12))
-	# Fleurs
-	_draw_rect(img, hs - 16, hs + 36, 2, 2, Color(0.82, 0.18, 0.22))
-	_draw_rect(img, hs + 14, hs + 36, 2, 2, Color(0.85, 0.70, 0.15))
-	_draw_rect(img, hs - 8, hs + 38, 2, 2, Color(0.75, 0.12, 0.65))
-	# Caillou
-	_draw_circle(img, hs + 20, hs + 36, 2, Color(0.48, 0.48, 0.52))
-
-# --- ROCHER 96x96 MEGA DÉTAILLÉ ---
-func _generate_rock_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
-	var s: int = size
-	var hs: int = s / 2
-	
-	# Ombre large
-	_draw_rect(img, 10, s - 8, s - 20, 8, Color(0, 0, 0, 0.25))
-	
-	# Rocher principal (formes complexes superposées)
-	_draw_circle(img, hs, hs + 10, 26, Color(0.35, 0.35, 0.39))
-	_draw_circle(img, hs - 10, hs + 4, 20, Color(0.42, 0.42, 0.46))
-	_draw_circle(img, hs + 12, hs + 6, 20, Color(0.44, 0.44, 0.48))
-	_draw_circle(img, hs, hs - 2, 18, Color(0.50, 0.50, 0.54))
-	_draw_circle(img, hs - 6, hs - 10, 14, Color(0.58, 0.58, 0.62))
-	_draw_circle(img, hs + 6, hs - 14, 12, Color(0.64, 0.64, 0.68))
-	_draw_circle(img, hs - 2, hs - 20, 10, Color(0.70, 0.70, 0.74))
-	_draw_circle(img, hs + 4, hs - 22, 8, Color(0.75, 0.75, 0.78))
-	
-	# Strates horizontales (bandes de roche détaillées)
-	_draw_rect(img, hs - 24, hs + 8, 48, 3, Color(0.30, 0.30, 0.34))
-	_draw_rect(img, hs - 20, hs + 2, 40, 3, Color(0.36, 0.36, 0.40))
-	_draw_rect(img, hs - 16, hs - 6, 32, 3, Color(0.44, 0.44, 0.48))
-	_draw_rect(img, hs - 12, hs - 14, 24, 3, Color(0.52, 0.52, 0.56))
-	_draw_rect(img, hs - 8, hs - 22, 16, 3, Color(0.60, 0.60, 0.64))
-	# Strates brisées/irrégulières
-	_draw_rect(img, hs - 18, hs - 10, 14, 2, Color(0.48, 0.48, 0.52))
-	_draw_rect(img, hs + 8, hs - 18, 12, 2, Color(0.56, 0.56, 0.60))
-	
-	# Texture granitique (points aléatoires)
-	for _i in range(40):
-		var gx: int = rng.randi_range(hs - 20, hs + 20)
-		var gy: int = rng.randi_range(hs - 20, hs + 20)
-		_draw_rect(img, gx, gy, 2, 2, Color(0.55, 0.55, 0.60))
-	
-	# Mousse luxuriante sur le côté gauche
-	_draw_circle(img, hs - 20, hs + 6, 8, Color(0.18, 0.33, 0.12))
-	_draw_circle(img, hs - 18, hs, 6, Color(0.24, 0.38, 0.16))
-	_draw_circle(img, hs - 22, hs + 10, 5, Color(0.22, 0.35, 0.14))
-	_draw_circle(img, hs - 16, hs - 6, 4, Color(0.26, 0.40, 0.18))
-	_draw_circle(img, hs - 14, hs + 14, 4, Color(0.20, 0.34, 0.12))
-	# Lichen orange
-	_draw_circle(img, hs - 18, hs + 2, 3, Color(0.55, 0.42, 0.22))
-	_draw_circle(img, hs - 20, hs + 8, 2, Color(0.52, 0.38, 0.18))
-	
-	# Cristaux / Géodes (petits brillants)
-	for cx in [hs - 4, hs + 8, hs + 2]:
-		for cy in [hs - 6, hs + 4, hs - 12]:
-			if rng.randf() < 0.5:
-				_draw_rect(img, cx, cy, 3, 3, Color(0.75, 0.72, 0.78))
-				_draw_rect(img, cx + 1, cy + 1, 1, 1, Color(0.92, 0.90, 0.95))
-	
-	# Petits cailloux autour (plus nombreux)
-	_draw_circle(img, hs - 28, hs + 26, 4, Color(0.42, 0.42, 0.46))
-	_draw_circle(img, hs + 26, hs + 24, 5, Color(0.48, 0.48, 0.52))
-	_draw_circle(img, hs + 20, hs + 28, 4, Color(0.40, 0.40, 0.44))
-	_draw_circle(img, hs - 24, hs + 30, 3, Color(0.46, 0.46, 0.50))
-	_draw_circle(img, hs + 14, hs + 32, 3, Color(0.44, 0.44, 0.48))
-	_draw_circle(img, hs - 14, hs + 28, 2, Color(0.50, 0.50, 0.54))
-	
-	# Fissures (plus nombreuses et détaillées)
-	# Fissure principale
-	_draw_rect(img, hs + 4, hs - 8, 2, 16, Color(0.20, 0.20, 0.23))
-	_draw_rect(img, hs + 5, hs - 6, 1, 12, Color(0.12, 0.12, 0.14))
-	# Fissure secondaire
-	_draw_rect(img, hs - 8, hs + 4, 3, 2, Color(0.24, 0.24, 0.28))
-	_draw_rect(img, hs - 8, hs + 6, 2, 6, Color(0.22, 0.22, 0.26))
-	_draw_rect(img, hs - 7, hs + 10, 1, 4, Color(0.16, 0.16, 0.18))
-	# Petite fissure en haut
-	_draw_rect(img, hs + 2, hs - 18, 2, 6, Color(0.26, 0.26, 0.30))
-	# Éboulis (petites pierres dans une fissure)
-	_draw_rect(img, hs + 3, hs + 6, 2, 2, Color(0.42, 0.42, 0.46))
-	_draw_rect(img, hs + 6, hs + 2, 2, 2, Color(0.40, 0.40, 0.44))
-	
-	# Herbe sèche autour du rocher
-	_draw_circle(img, hs + 24, hs + 18, 4, Color(0.30, 0.42, 0.16))
-	_draw_circle(img, hs - 26, hs + 16, 3, Color(0.28, 0.40, 0.14))
-	_draw_rect(img, hs + 18, hs + 22, 3, 4, Color(0.32, 0.44, 0.18))
-	# Petite fleur sauvage
-	_draw_rect(img, hs + 28, hs + 20, 2, 2, Color(0.78, 0.15, 0.20))
-	_draw_rect(img, hs + 29, hs + 22, 2, 3, Color(0.20, 0.38, 0.10))
-
-# --- COFFRE 64x64 DÉTAILLÉ ---
-func _generate_chest_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
-	var s: int = size
-	var hs: int = s / 2
-	var wood_dark: Color = Color(0.38, 0.22, 0.10)
-	var wood_mid: Color = Color(0.52, 0.32, 0.16)
-	var wood_light: Color = Color(0.62, 0.40, 0.22)
-	var gold: Color = Color(0.92, 0.78, 0.20)
-	var gold_dark: Color = Color(0.75, 0.60, 0.12)
-	
-	# Ombre
-	_draw_rect(img, 8, s - 6, s - 16, 6, Color(0, 0, 0, 0.30))
-	
-	# Corps du coffre (base)
-	_add_noise_to_rect(img, hs - 18, hs - 4, 36, 24, wood_dark, 0.04, rng)
-	# Planches verticales
-	for px in [hs - 14, hs - 6, hs + 2, hs + 10]:
-		_draw_rect(img, px, hs - 4, 2, 24, Color(0.28, 0.16, 0.08))
-	
-	# Couvercle (plus clair, légèrement arrondi en haut)
-	_add_noise_to_rect(img, hs - 18, hs - 20, 36, 18, wood_mid, 0.04, rng)
-	# Planches du couvercle
-	for px in [hs - 14, hs - 6, hs + 2, hs + 10]:
-		_draw_rect(img, px, hs - 20, 2, 18, Color(0.35, 0.20, 0.10))
-	
-	# Courbe du couvercle (highlight au centre)
-	_draw_rect(img, hs - 12, hs - 22, 24, 4, wood_light)
-	_draw_rect(img, hs - 8, hs - 24, 16, 3, Color(0.68, 0.44, 0.24))
-	
-	# Bandes métalliques dorées (verticales)
-	_draw_rect(img, hs - 18, hs - 20, 4, 40, gold_dark)
-	_draw_rect(img, hs + 14, hs - 20, 4, 40, gold_dark)
-	# Rivets sur les bandes
-	for ry in [hs - 16, hs - 8, hs, hs + 8, hs + 14]:
-		_draw_rect(img, hs - 17, ry, 2, 2, gold)
-		_draw_rect(img, hs + 15, ry, 2, 2, gold)
-	
-	# Serrure centrale
-	_draw_rect(img, hs - 5, hs - 6, 10, 10, gold_dark)
-	_draw_rect(img, hs - 3, hs - 4, 6, 6, gold)
-	_draw_rect(img, hs - 1, hs - 2, 2, 2, Color(0.20, 0.15, 0.05))
-	
-	# Trou de la serrure
-	_draw_rect(img, hs - 1, hs - 4, 2, 3, Color(0.15, 0.10, 0.05))
-	
-	# Éclats de lumière sur le couvercle (reflet)
-	_draw_rect(img, hs - 8, hs - 18, 4, 2, Color(1.0, 0.95, 0.80))
-	_draw_rect(img, hs + 4, hs - 16, 3, 2, Color(1.0, 0.95, 0.80))
-
-# --- ENNEMI JAPONAIS 64x64 ---
-func _generate_enemy_sprite(img: Image, size: int, rng: RandomNumberGenerator, enemy_type: String) -> void:
-	var s: int = size
-	var hs: int = s / 2
-	
-	var body_color: Color = Color(0.7, 0.75, 0.72)
-	var head_color: Color = Color(0.8, 0.85, 0.82)
-	var detail_color: Color = Color(0.5, 0.5, 0.5)
-	var eye_color: Color = Color(0.15, 0.6, 0.15)
-	var weapon_color: Color = Color(0.55, 0.55, 0.6)
-	
-	match enemy_type:
-		"skeleton":
-			body_color = Color(0.78, 0.82, 0.78)
-			head_color = Color(0.88, 0.90, 0.88)
-			detail_color = Color(0.25, 0.25, 0.25)
-			weapon_color = Color(0.65, 0.65, 0.70)
-			eye_color = Color(0.85, 0.20, 0.15)
-		"goblin":
-			body_color = Color(0.75, 0.15, 0.15)  # Oni rouge
-			head_color = Color(0.85, 0.20, 0.20)
-			detail_color = Color(0.55, 0.10, 0.10)
-			weapon_color = Color(0.35, 0.25, 0.15)  # Kanabo (club)
-			eye_color = Color(0.95, 0.85, 0.20)
-		"archer":
-			body_color = Color(0.35, 0.25, 0.18)  # Kimono sombre
-			head_color = Color(0.90, 0.75, 0.60)  # Peau japonaise
-			detail_color = Color(0.20, 0.12, 0.08)
-			weapon_color = Color(0.45, 0.30, 0.15)  # Yumi (arc)
-			eye_color = Color(0.12, 0.08, 0.06)
-		"swordsman":
-			body_color = Color(0.12, 0.08, 0.06)  # Armure noire samurai
-			head_color = Color(0.90, 0.75, 0.60)
-			detail_color = Color(0.85, 0.25, 0.25)  # Vermilion accents
-			weapon_color = Color(0.85, 0.82, 0.78)  # Katana
-			eye_color = Color(0.12, 0.08, 0.06)
-		"tengu":
-			body_color = Color(0.45, 0.35, 0.25)  # Plumage marron
-			head_color = Color(0.55, 0.45, 0.35)
-			detail_color = Color(0.85, 0.65, 0.15)  # Bec jaune
-			weapon_color = Color(0.35, 0.25, 0.18)  # Éventail
-			eye_color = Color(0.85, 0.20, 0.10)
-		"kappa":
-			body_color = Color(0.25, 0.55, 0.65)  # Peau verte
-			head_color = Color(0.30, 0.60, 0.70)
-			detail_color = Color(0.20, 0.45, 0.55)
-			weapon_color = Color(0.35, 0.25, 0.18)  # Éventail
-			eye_color = Color(0.85, 0.85, 0.20)
-		"ninja":
-			body_color = Color(0.08, 0.08, 0.10)  # Tenue noire
-			head_color = Color(0.10, 0.10, 0.12)
-			detail_color = Color(0.20, 0.20, 0.22)
-			weapon_color = Color(0.55, 0.55, 0.60)  # Kunai/Shuriken
-			eye_color = Color(0.85, 0.85, 0.20)
-		"monk":
-			body_color = Color(0.85, 0.70, 0.45)  # Robe safran
-			head_color = Color(0.90, 0.75, 0.60)
-			detail_color = Color(0.70, 0.55, 0.30)
-			weapon_color = Color(0.55, 0.45, 0.30)  # Bâton
-			eye_color = Color(0.12, 0.08, 0.06)
-	
-	# Ombre elliptique réaliste
-	for x in range(s):
-		for y in range(s):
-			var ox: float = (x - hs) / 16.0
-			var oy: float = (y - (s - 4)) / 4.0
-			var dist: float = ox * ox + oy * oy
-			if dist <= 1.0:
-				var alpha: float = 0.30 * (1.0 - dist * 0.5)
-				img.set_pixel(x, y, Color(0, 0, 0, alpha))
-	
-	# Corps (ovale avec dégradé vertical)
-	_draw_shaded_circle(img, hs, hs + 8, 18, body_color, Vector2(-0.3, -0.8))
-	_draw_shaded_circle(img, hs - 4, hs + 6, 10, head_color, Vector2(-0.3, -0.8))
-	_draw_shaded_circle(img, hs + 4, hs + 10, 10, head_color, Vector2(-0.3, -0.8))
-	# Texture du corps
-	_add_noise_to_rect(img, hs - 10, hs - 2, 20, 20, body_color, 0.04, rng)
-	
-	# Tête (cercle plus haut avec ombrage)
-	_draw_shaded_circle(img, hs, hs - 12, 14, head_color, Vector2(-0.3, -0.8))
-	_draw_shaded_circle(img, hs - 3, hs - 15, 10, Color(head_color.r + 0.05, head_color.g + 0.05, head_color.b + 0.05), Vector2(-0.3, -0.8))
-	
-	# Yeux détaillés avec blancs, iris, pupilles, reflets
-	# Blanches
-	_draw_shaded_circle(img, hs - 5, hs - 14, 4, Color(0.95, 0.95, 0.95), Vector2(-0.2, -0.2))
-	_draw_shaded_circle(img, hs + 5, hs - 14, 4, Color(0.95, 0.95, 0.95), Vector2(-0.2, -0.2))
-	# Iris
-	_draw_circle(img, hs - 5, hs - 14, 3, eye_color)
-	_draw_circle(img, hs + 5, hs - 14, 3, eye_color)
-	# Pupilles
-	_draw_rect(img, hs - 6, hs - 15, 2, 2, Color(0.05, 0.05, 0.05))
-	_draw_rect(img, hs + 4, hs - 15, 2, 2, Color(0.05, 0.05, 0.05))
-	# Reflets dans les yeux
-	_draw_rect(img, hs - 4, hs - 15, 1, 1, Color(1, 1, 1))
-	_draw_rect(img, hs + 5, hs - 15, 1, 1, Color(1, 1, 1))
-	# Sourcils/oreilles selon type
-	if enemy_type == "goblin":
-		# Cornes d'Oni (rouges)
-		_draw_triangle(img, hs - 12, hs - 18, hs - 18, hs - 28, hs - 8, hs - 22, head_color)
-		_draw_triangle(img, hs + 12, hs - 18, hs + 18, hs - 28, hs + 8, hs - 22, head_color)
-		# Dents crochues
-		_draw_rect(img, hs - 2, hs - 5, 2, 3, Color(0.90, 0.90, 0.85))
-		_draw_rect(img, hs, hs - 5, 2, 3, Color(0.90, 0.90, 0.85))
-	elif enemy_type == "skeleton":
-		# Crâne avec orbites profondes
-		_draw_rect(img, hs - 5, hs - 10, 10, 4, Color(0.08, 0.08, 0.08))
-		_draw_rect(img, hs - 4, hs - 11, 8, 2, Color(0.05, 0.05, 0.05))
-		# Mâchoire
-		_draw_rect(img, hs - 4, hs - 4, 8, 3, Color(0.70, 0.74, 0.70))
-		# Dents
-		_draw_rect(img, hs - 2, hs - 3, 1, 2, Color(0.85, 0.88, 0.85))
-		_draw_rect(img, hs, hs - 3, 1, 2, Color(0.85, 0.88, 0.85))
-		_draw_rect(img, hs + 1, hs - 3, 1, 2, Color(0.85, 0.88, 0.85))
-		# Côtes visibles
-		for ry in [hs + 4, hs + 8, hs + 12]:
-			_draw_rect(img, hs - 6, ry, 12, 2, Color(0.75, 0.78, 0.75))
-	elif enemy_type == "swordsman":
-		# Casque samurai (kabuto) avec crête
-		_draw_gradient_rect(img, hs - 12, hs - 24, 24, 12, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
-		_draw_rect(img, hs - 2, hs - 30, 4, 8, Color(0.85, 0.25, 0.25))  # Crête vermilion
-		# Visière (mempo)
-		_draw_gradient_rect(img, hs - 10, hs - 16, 20, 6, Color(0.15, 0.10, 0.08), Color(0.10, 0.06, 0.04))
-		# Chignon samurai
-		_draw_circle(img, hs + 8, hs - 20, 4, Color(0.06, 0.04, 0.02))
-	elif enemy_type == "archer":
-		# Chapeau conique (jingasa)
-		_draw_gradient_rect(img, hs - 14, hs - 26, 28, 8, Color(0.35, 0.25, 0.18), Color(0.25, 0.18, 0.12))
-		_draw_rect(img, hs - 2, hs - 28, 4, 4, Color(0.35, 0.25, 0.18))
-	elif enemy_type == "tengu":
-		# Masque de Tengu avec long nez
-		_draw_shaded_circle(img, hs, hs - 14, 14, Color(0.55, 0.45, 0.35), Vector2(-0.3, -0.8))
-		# Long nez rouge
-		_draw_triangle(img, hs, hs - 16, hs + 4, hs - 32, hs - 4, hs - 16, Color(0.85, 0.20, 0.10))
-		# Plumes sur la tête
-		for py in [hs - 22, hs - 26, hs - 30]:
-			_draw_rect(img, hs - 8, py, 16, 2, Color(0.45, 0.35, 0.25))
-	elif enemy_type == "kappa":
-		# Tête chauve avec assiette
-		_draw_shaded_circle(img, hs, hs - 14, 14, Color(0.30, 0.60, 0.70), Vector2(-0.3, -0.8))
-		# Assiette sur la tête
-		_draw_circle(img, hs, hs - 20, 6, Color(0.65, 0.65, 0.60))
-		_draw_circle(img, hs, hs - 20, 4, Color(0.55, 0.55, 0.50))
-	elif enemy_type == "ninja":
-		# Masque ninja avec seulement les yeux visibles
-		_draw_shaded_circle(img, hs, hs - 14, 14, Color(0.10, 0.10, 0.12), Vector2(-0.3, -0.8))
-		# Bandeau sur les yeux
-		_draw_rect(img, hs - 12, hs - 16, 24, 4, Color(0.08, 0.08, 0.10))
-	elif enemy_type == "monk":
-		# Tête rasée
-		_draw_shaded_circle(img, hs, hs - 14, 14, Color(0.90, 0.75, 0.60), Vector2(-0.3, -0.8))
-		# Sourcils rasés
-		_draw_rect(img, hs - 6, hs - 18, 12, 2, Color(0.90, 0.75, 0.60))
-	
-	# Bouche détaillée
-	if enemy_type == "skeleton":
-		_draw_rect(img, hs - 3, hs - 5, 6, 2, Color(0.05, 0.05, 0.05))
-	else:
-		_draw_rect(img, hs - 3, hs - 6, 6, 2, Color(0.12, 0.08, 0.06))
-		_draw_rect(img, hs - 2, hs - 6, 4, 1, Color(0.75, 0.25, 0.20))  # Lèvre
-	
-	# Détail / armure sur le corps avec textures
-	if enemy_type == "swordsman":
-		# Armure samurai (do) avec lames laquées noires
-		_draw_shaded_circle(img, hs, hs + 2, 14, Color(0.12, 0.08, 0.06), Vector2(-0.5, -0.8))
-		_draw_gradient_rect(img, hs - 8, hs - 2, 16, 16, Color(0.15, 0.10, 0.08), Color(0.08, 0.05, 0.04))
-		_add_bevel(img, hs - 8, hs - 2, 16, 16, Color(0.20, 0.12, 0.08), Color(0.06, 0.04, 0.02))
-		# Bordures vermilion
-		_draw_rect(img, hs - 8, hs - 2, 16, 2, Color(0.85, 0.25, 0.25))
-		_draw_rect(img, hs - 8, hs + 14, 16, 2, Color(0.85, 0.25, 0.25))
-		# Mon (crest) au centre
-		_draw_circle(img, hs, hs + 6, 4, Color(0.85, 0.25, 0.25))
-		_draw_circle(img, hs, hs + 6, 2, Color(0.95, 0.85, 0.20))
-	elif enemy_type == "archer":
-		# Kimono avec motifs
-		_draw_gradient_rect(img, hs - 14, hs, 6, 20, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
-		_draw_gradient_rect(img, hs + 8, hs, 6, 20, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
-		_draw_gradient_rect(img, hs - 8, hs + 2, 16, 16, Color(0.42, 0.30, 0.20), Color(0.28, 0.18, 0.10))
-		# Obi (ceinture) vermilion
-		_draw_rect(img, hs - 8, hs + 10, 16, 4, Color(0.85, 0.25, 0.25))
-		# Carquois avec flèches
-		_draw_rect(img, hs - 16, hs - 10, 5, 14, Color(0.30, 0.18, 0.08))
-		for ay in [hs - 12, hs - 8, hs - 4]:
-			_draw_rect(img, hs - 18, ay, 2, 10, Color(0.55, 0.45, 0.30))
-			_draw_rect(img, hs - 16, ay - 2, 2, 2, Color(0.55, 0.55, 0.60))
-	elif enemy_type == "goblin":
-		# Peau d'Oni avec muscles
-		_draw_gradient_rect(img, hs - 8, hs, 16, 12, Color(0.75, 0.15, 0.15), Color(0.55, 0.10, 0.10))
-		# Tatouages/scarifications
-		for ry in [hs + 2, hs + 6]:
-			_draw_rect(img, hs - 5, ry, 10, 2, Color(0.45, 0.08, 0.08))
-		# Fundoshi (loincloth)
-		_draw_rect(img, hs - 6, hs + 10, 12, 3, Color(0.85, 0.25, 0.25))
-	elif enemy_type == "tengu":
-		# Plumage sur le corps
-		_draw_gradient_rect(img, hs - 8, hs, 16, 12, Color(0.45, 0.35, 0.25), Color(0.35, 0.25, 0.15))
-		# Ailes pliées
-		for wy in [hs - 2, hs + 2, hs + 6]:
-			_draw_rect(img, hs - 14, wy, 6, 3, Color(0.50, 0.40, 0.30))
-			_draw_rect(img, hs + 8, wy, 6, 3, Color(0.50, 0.40, 0.30))
-	elif enemy_type == "kappa":
-		# Carapace de tortue sur le dos
-		_draw_gradient_rect(img, hs - 8, hs - 2, 16, 14, Color(0.25, 0.55, 0.65), Color(0.20, 0.45, 0.55))
-		# Motifs de carapace
-		for cy in [hs + 2, hs + 6]:
-			_draw_rect(img, hs - 6, cy, 12, 2, Color(0.20, 0.50, 0.60))
-	elif enemy_type == "ninja":
-		# Tenue noire ajustée
-		_draw_gradient_rect(img, hs - 8, hs, 16, 12, Color(0.08, 0.08, 0.10), Color(0.06, 0.06, 0.08))
-		# Ceinture avec kunai
-		_draw_rect(img, hs - 6, hs + 10, 12, 3, Color(0.15, 0.15, 0.18))
-		_draw_rect(img, hs - 4, hs + 12, 3, 5, Color(0.55, 0.55, 0.60))
-	elif enemy_type == "monk":
-		# Robe de moine safran
-		_draw_gradient_rect(img, hs - 10, hs, 20, 14, Color(0.85, 0.70, 0.45), Color(0.70, 0.55, 0.30))
-		# Kesa (écharpe de moine)
-		_draw_rect(img, hs - 8, hs + 2, 16, 4, Color(0.60, 0.45, 0.25))
-	elif enemy_type == "skeleton":
-		# Os du torse
-		_draw_rect(img, hs - 4, hs - 2, 8, 16, Color(0.78, 0.82, 0.78))
-		_draw_rect(img, hs - 8, hs + 2, 4, 3, Color(0.75, 0.78, 0.75))
-		_draw_rect(img, hs + 4, hs + 2, 4, 3, Color(0.75, 0.78, 0.75))
-		_draw_rect(img, hs - 8, hs + 8, 4, 3, Color(0.75, 0.78, 0.75))
-		_draw_rect(img, hs + 4, hs + 8, 4, 3, Color(0.75, 0.78, 0.75))
-		# Brume d'âme (aura rouge)
-		for x in range(hs - 20, hs + 20):
-			for y in range(hs - 20, hs + 20):
-				var dx: float = float(x - hs) / 18.0
-				var dy: float = float(y - hs) / 18.0
-				var dist: float = sqrt(dx * dx + dy * dy)
-				if dist >= 0.85 and dist <= 1.0:
-					var existing: Color = img.get_pixel(x, y)
-					if existing.a < 0.1:
-						img.set_pixel(x, y, Color(0.80, 0.15, 0.15, 0.15))
-	
-	# Jambes / Pieds détaillés
-	if enemy_type == "goblin":
-		# Jambes musclées d'Oni
-		_draw_gradient_rect(img, hs - 6, hs + 12, 5, 6, Color(0.75, 0.15, 0.15), Color(0.55, 0.10, 0.10))
-		_draw_gradient_rect(img, hs + 1, hs + 12, 5, 6, Color(0.75, 0.15, 0.15), Color(0.55, 0.10, 0.10))
-	elif enemy_type == "tengu":
-		# Pattes d'oiseau avec griffes
-		_draw_gradient_rect(img, hs - 6, hs + 12, 5, 6, Color(0.55, 0.45, 0.35), Color(0.45, 0.35, 0.25))
-		_draw_gradient_rect(img, hs + 1, hs + 12, 5, 6, Color(0.55, 0.45, 0.35), Color(0.45, 0.35, 0.25))
-		# Griffes
-		_draw_triangle(img, hs - 6, hs + 18, hs - 8, hs + 22, hs - 4, hs + 18, Color(0.85, 0.65, 0.15))
-		_draw_triangle(img, hs + 6, hs + 18, hs + 8, hs + 22, hs + 4, hs + 18, Color(0.85, 0.65, 0.15))
-	elif enemy_type == "kappa":
-		# Jambes palmées
-		_draw_gradient_rect(img, hs - 6, hs + 12, 5, 6, Color(0.30, 0.60, 0.70), Color(0.20, 0.45, 0.55))
-		_draw_gradient_rect(img, hs + 1, hs + 12, 5, 6, Color(0.30, 0.60, 0.70), Color(0.20, 0.45, 0.55))
-		# Palmes
-		_draw_rect(img, hs - 8, hs + 18, 6, 2, Color(0.25, 0.55, 0.65))
-		_draw_rect(img, hs + 2, hs + 18, 6, 2, Color(0.25, 0.55, 0.65))
-	elif enemy_type == "ninja":
-		# Jambes ajustées
-		_draw_gradient_rect(img, hs - 6, hs + 12, 5, 6, Color(0.08, 0.08, 0.10), Color(0.06, 0.06, 0.08))
-		_draw_gradient_rect(img, hs + 1, hs + 12, 5, 6, Color(0.08, 0.08, 0.10), Color(0.06, 0.06, 0.08))
-	elif enemy_type == "monk":
-		# Robe longue
-		_draw_gradient_rect(img, hs - 8, hs + 12, 16, 6, Color(0.85, 0.70, 0.45), Color(0.70, 0.55, 0.30))
-		# Pieds nus
-		_draw_rect(img, hs - 10, hs + 22, 8, 3, Color(0.55, 0.10, 0.10))
-		_draw_rect(img, hs + 2, hs + 22, 8, 3, Color(0.55, 0.10, 0.10))
-	elif enemy_type == "skeleton":
-		# Os des jambes
-		_draw_rect(img, hs - 6, hs + 16, 3, 10, Color(0.78, 0.82, 0.78))
-		_draw_rect(img, hs + 3, hs + 16, 3, 10, Color(0.78, 0.82, 0.78))
-		# Pieds osseux
-		_draw_rect(img, hs - 8, hs + 24, 6, 3, Color(0.75, 0.78, 0.75))
-		_draw_rect(img, hs + 2, hs + 24, 6, 3, Color(0.75, 0.78, 0.75))
-	elif enemy_type == "swordsman":
-		# Hakama (pantalon samurai)
-		_draw_gradient_rect(img, hs - 8, hs + 16, 6, 10, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
-		_draw_gradient_rect(img, hs + 2, hs + 16, 6, 10, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
-		# Geta (sandales en bois)
-		_draw_rect(img, hs - 9, hs + 24, 8, 3, Color(0.35, 0.25, 0.18))
-		_draw_rect(img, hs + 1, hs + 24, 8, 3, Color(0.35, 0.25, 0.18))
-		# Dents des geta
-		_draw_rect(img, hs - 6, hs + 26, 2, 2, Color(0.35, 0.25, 0.18))
-		_draw_rect(img, hs + 4, hs + 26, 2, 2, Color(0.35, 0.25, 0.18))
-	elif enemy_type == "archer":
-		# Hakama (pantalon archer)
-		_draw_gradient_rect(img, hs - 7, hs + 16, 5, 10, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
-		_draw_gradient_rect(img, hs + 2, hs + 16, 5, 10, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
-		# Tabi (chaussettes)
-		_draw_rect(img, hs - 8, hs + 24, 6, 3, Color(0.90, 0.90, 0.88))
-		_draw_rect(img, hs + 2, hs + 24, 6, 3, Color(0.90, 0.90, 0.88))
-	
-	# Armes japonaises détaillées
-	if enemy_type == "skeleton":
-		# Katana rouillée à droite
-		_draw_gradient_rect(img, hs + 18, hs - 6, 5, 26, Color(0.72, 0.75, 0.80), Color(0.55, 0.58, 0.62))
-		_draw_rect(img, hs + 20, hs - 6, 2, 26, Color(0.82, 0.85, 0.90))  # Tranchant
-		_draw_rect(img, hs + 16, hs - 10, 9, 6, Color(0.55, 0.55, 0.60))  # Tsuba (garde)
-		_draw_rect(img, hs + 17, hs + 14, 7, 3, Color(0.45, 0.35, 0.25))  # Tsuka (poignée)
-		_draw_rect(img, hs + 19, hs + 18, 3, 3, Color(0.65, 0.55, 0.30))  # Kashira (pommeau)
-		# Rouille sur la lame
-		_draw_rect(img, hs + 19, hs + 2, 2, 4, Color(0.55, 0.30, 0.15))
-		_draw_rect(img, hs + 18, hs - 4, 2, 3, Color(0.55, 0.30, 0.15))
-	elif enemy_type == "goblin":
-		# Kanabo (massue à pointes d'Oni)
-		_draw_rect(img, hs + 20, hs - 8, 4, 26, Color(0.42, 0.28, 0.15))  # Manche
-		_draw_rect(img, hs + 18, hs - 12, 8, 10, Color(0.55, 0.55, 0.60))  # Lame haut
-		_draw_rect(img, hs + 18, hs - 2, 8, 10, Color(0.55, 0.55, 0.60))  # Lame bas
-		_draw_rect(img, hs + 20, hs - 14, 4, 14, Color(0.65, 0.65, 0.70))  # Tranchant
-		# Pointes (spikes)
-		for sy in [hs - 10, hs - 4, hs + 2]:
-			_draw_rect(img, hs + 16, sy, 3, 3, Color(0.75, 0.75, 0.80))
-			_draw_rect(img, hs + 23, sy, 3, 3, Color(0.75, 0.75, 0.80))
-		# Sang sur la massue
-		_draw_rect(img, hs + 19, hs - 10, 2, 3, Color(0.75, 0.10, 0.10))
-	elif enemy_type == "archer":
-		# Arc en bois courbé
-		for ay in range(hs - 16, hs + 16):
-			var ax: int = hs - 20 + int(sin((ay - (hs - 16)) / 32.0 * PI) * 6)
-			_draw_rect(img, ax, ay, 3, 2, Color(0.42, 0.28, 0.15))
-		# Corde
-		_draw_rect(img, hs - 22, hs - 16, 1, 32, Color(0.75, 0.72, 0.68))
-		# Flèche prête à tirer
-		_draw_rect(img, hs - 20, hs - 4, 18, 2, Color(0.55, 0.45, 0.30))
-		_draw_rect(img, hs - 2, hs - 6, 4, 6, Color(0.55, 0.55, 0.60))  # Pointe
-		# Carquois avec flèches visibles
-		_draw_rect(img, hs - 16, hs - 12, 5, 14, Color(0.28, 0.16, 0.08))
-		for fy in [hs - 10, hs - 6, hs - 2]:
-			_draw_rect(img, hs - 18, fy, 2, 8, Color(0.48, 0.38, 0.28))
-			_draw_rect(img, hs - 16, fy - 2, 2, 2, Color(0.55, 0.55, 0.60))
-	elif enemy_type == "swordsman":
-		# Katana brillant à droite
-		_draw_gradient_rect(img, hs + 18, hs - 8, 5, 28, Color(0.85, 0.82, 0.78), Color(0.70, 0.68, 0.65))
-		_draw_rect(img, hs + 20, hs - 8, 2, 28, Color(0.92, 0.90, 0.88))  # Tranchant brillant
-		_draw_rect(img, hs + 16, hs - 12, 9, 6, Color(0.85, 0.25, 0.25))  # Tsuba (garde vermilion)
-		_draw_rect(img, hs + 17, hs + 16, 7, 4, Color(0.35, 0.25, 0.18))  # Tsuka (poignée en bois)
-		# Same (tressage de la poignée)
-		for ty in [hs + 17, hs + 19]:
-			_draw_rect(img, hs + 17, ty, 7, 1, Color(0.25, 0.15, 0.10))
-		_draw_rect(img, hs + 19, hs + 18, 3, 3, Color(0.85, 0.25, 0.25))  # Kashira (pommeau vermilion)
-		# Menuki (décorations sur la poignée)
-		_draw_circle(img, hs + 20, hs + 18, 1, Color(0.95, 0.85, 0.20))
-		_draw_rect(img, hs + 21, hs - 10, 1, 8, Color(1.0, 1.0, 1.0))
-		_draw_rect(img, hs + 23, hs, 1, 6, Color(1.0, 1.0, 1.0))
-	elif enemy_type == "tengu":
-		# Éventail plié (tessen)
-		_draw_rect(img, hs + 18, hs - 4, 4, 20, Color(0.35, 0.25, 0.18))
-		_draw_rect(img, hs + 16, hs - 2, 2, 16, Color(0.85, 0.65, 0.15))
-		_draw_rect(img, hs + 20, hs - 2, 2, 16, Color(0.85, 0.65, 0.15))
-		# Plumes de l'éventail
-		for fy in [hs - 2, hs + 6, hs + 14]:
-			_draw_rect(img, hs + 22, fy, 3, 2, Color(0.45, 0.35, 0.25))
-	elif enemy_type == "kappa":
-		# Éventail plié
-		_draw_rect(img, hs + 18, hs - 4, 4, 20, Color(0.35, 0.25, 0.18))
-		_draw_rect(img, hs + 16, hs - 2, 2, 16, Color(0.30, 0.60, 0.70))
-		_draw_rect(img, hs + 20, hs - 2, 2, 16, Color(0.30, 0.60, 0.70))
-	elif enemy_type == "ninja":
-		# Kunai dans la main
-		_draw_rect(img, hs + 18, hs - 2, 3, 16, Color(0.55, 0.55, 0.60))
-		_draw_triangle(img, hs + 18, hs - 6, hs + 21, hs - 10, hs + 21, hs - 2, Color(0.55, 0.55, 0.60))
-		# Shuriken (étoile)
-		_draw_rect(img, hs + 22, hs + 8, 8, 2, Color(0.55, 0.55, 0.60))
-		_draw_rect(img, hs + 24, hs + 4, 2, 8, Color(0.55, 0.55, 0.60))
-	elif enemy_type == "monk":
-		# Bâton de moine (shakujō)
-		_draw_rect(img, hs + 18, hs - 8, 4, 28, Color(0.55, 0.45, 0.30))
-		_draw_rect(img, hs + 19, hs - 8, 2, 28, Color(0.65, 0.55, 0.40))
-		# Anneaux métalliques
-		for ry in [hs - 4, hs + 4, hs + 12]:
-			_draw_circle(img, hs + 20, ry, 3, Color(0.75, 0.72, 0.68))
-			_draw_circle(img, hs + 20, ry, 2, Color(0.55, 0.55, 0.60))
-		# Garde ornementée
-		_draw_rect(img, hs + 16, hs + 18, 14, 5, Color(0.48, 0.42, 0.28))
-		_draw_rect(img, hs + 18, hs + 16, 10, 3, Color(0.62, 0.55, 0.38))
-		# Bouclier à gauche (swordsman uniquement)
-		# Poignée
-		_draw_rect(img, hs + 22, hs + 23, 3, 10, Color(0.42, 0.28, 0.15))
-		# Pommeau sphérique
-		_draw_shaded_circle(img, hs + 23, hs + 34, 4, Color(0.68, 0.58, 0.32), Vector2(-0.3, -0.5))
-	
-	# Bouclier à gauche (swordsman uniquement)
-	if enemy_type == "swordsman":
-		# Bouclier ovale avec dégradé
-		for x in range(hs - 28, hs - 6):
-			for y in range(hs - 4, hs + 14):
-				var dx: float = float(x - (hs - 17)) / 11.0
-				var dy: float = float(y - (hs + 5)) / 9.0
-				if dx * dx + dy * dy <= 1.0:
-					var t: float = dx * dx + dy * dy
-					var c: Color = Color(lerp(0.60, 0.40, t), lerp(0.63, 0.43, t), lerp(0.73, 0.53, t))
-					img.set_pixel(x, y, c)
-		# Bordure dorée
-		for x in range(hs - 28, hs - 6):
-			for y in range(hs - 4, hs + 14):
-				var dx: float = float(x - (hs - 17)) / 11.0
-				var dy: float = float(y - (hs + 5)) / 9.0
-				var dist: float = dx * dx + dy * dy
-				if dist >= 0.78 and dist <= 1.0:
-					img.set_pixel(x, y, Color(0.85, 0.72, 0.20))
-		# Blason (crâne stylisé)
-		_draw_circle(img, hs - 17, hs + 5, 4, Color(0.25, 0.28, 0.38))
-		_draw_rect(img, hs - 19, hs + 3, 4, 2, Color(0.85, 0.72, 0.20))
-		_draw_rect(img, hs - 15, hs + 3, 4, 2, Color(0.85, 0.72, 0.20))
-		# Bosses métalliques
-		_draw_shaded_circle(img, hs - 17, hs + 5, 2, Color(0.72, 0.72, 0.78), Vector2(-0.3, -0.3))
-	
-	# Aura spécifique selon le type
-	if enemy_type == "goblin":
-		# Aura verdâtre toxique
-		for x in range(hs - 20, hs + 20):
-			for y in range(hs - 20, hs + 20):
-				var dx: float = float(x - hs) / 18.0
-				var dy: float = float(y - hs) / 18.0
-				var dist: float = sqrt(dx * dx + dy * dy)
-				if dist >= 0.9 and dist <= 1.0:
-					var existing: Color = img.get_pixel(x, y)
-					if existing.a < 0.1:
-						img.set_pixel(x, y, Color(0.20, 0.55, 0.10, 0.12))
-
-# --- HÉROS JAPONAIS 64x64 ---
-func _generate_hero_sprite(img: Image, size: int, rng: RandomNumberGenerator) -> void:
-	var s: int = size
-	var hs: int = s / 2
-	
-	# Ombre elliptique
-	for x in range(s):
-		for y in range(s):
-			var ox: float = (x - hs) / 16.0
-			var oy: float = (y - (s - 4)) / 4.0
-			var dist: float = ox * ox + oy * oy
-			if dist <= 1.0:
-				var alpha: float = 0.30 * (1.0 - dist * 0.5)
-				img.set_pixel(x, y, Color(0, 0, 0, alpha))
-	
-	# Corps (kimono sombre avec armure)
-	_draw_shaded_circle(img, hs, hs + 8, 18, Color(0.35, 0.25, 0.18), Vector2(-0.3, -0.8))
-	_add_noise_to_rect(img, hs - 10, hs - 2, 20, 20, Color(0.35, 0.25, 0.18), 0.04, rng)
-	
-	# Armure de poitrine (do) - lames laquées noires
-	_draw_shaded_circle(img, hs, hs + 2, 14, Color(0.12, 0.08, 0.06), Vector2(-0.5, -0.8))
-	_draw_gradient_rect(img, hs - 8, hs - 2, 16, 16, Color(0.15, 0.10, 0.08), Color(0.08, 0.05, 0.04))
-	_add_bevel(img, hs - 8, hs - 2, 16, 16, Color(0.20, 0.12, 0.08), Color(0.06, 0.04, 0.02))
-	# Bordures vermilion
-	_draw_rect(img, hs - 8, hs - 2, 16, 2, Color(0.85, 0.25, 0.25))
-	_draw_rect(img, hs - 8, hs + 14, 16, 2, Color(0.85, 0.25, 0.25))
-	# Mon (crest) au centre
-	_draw_circle(img, hs, hs + 6, 4, Color(0.85, 0.25, 0.25))
-	_draw_circle(img, hs, hs + 6, 2, Color(0.95, 0.85, 0.20))
-	
-	# Épaulettes (sode)
-	_draw_gradient_rect(img, hs - 16, hs - 4, 8, 12, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
-	_draw_rect(img, hs - 16, hs - 4, 8, 2, Color(0.85, 0.25, 0.25))
-	_draw_gradient_rect(img, hs + 8, hs - 4, 8, 12, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
-	_draw_rect(img, hs + 8, hs - 4, 8, 2, Color(0.85, 0.25, 0.25))
-	
-	# Tête (peau japonaise)
-	_draw_shaded_circle(img, hs, hs - 12, 14, Color(0.90, 0.75, 0.60), Vector2(-0.3, -0.8))
-	_draw_shaded_circle(img, hs - 3, hs - 15, 10, Color(0.92, 0.78, 0.65), Vector2(-0.3, -0.8))
-	
-	# Casque samurai (kabuto) avec crête
-	_draw_gradient_rect(img, hs - 12, hs - 24, 24, 12, Color(0.12, 0.08, 0.06), Color(0.08, 0.05, 0.04))
-	_draw_rect(img, hs - 2, hs - 30, 4, 8, Color(0.85, 0.25, 0.25))  # Crête vermilion
-	# Visière (mempo)
-	_draw_gradient_rect(img, hs - 10, hs - 16, 20, 6, Color(0.15, 0.10, 0.08), Color(0.10, 0.06, 0.04))
-	# Chignon samurai
-	_draw_circle(img, hs + 8, hs - 20, 4, Color(0.06, 0.04, 0.02))
-	
-	# Cheveux noirs visibles sous le casque
-	_draw_shaded_circle(img, hs, hs - 18, 12, Color(0.06, 0.04, 0.02), Vector2(-0.3, -0.8))
-	_draw_circle(img, hs + 6, hs - 22, 5, Color(0.06, 0.04, 0.02))  # Chignon
-	
-	# Yeux détaillés
-	_draw_shaded_circle(img, hs - 5, hs - 14, 4, Color(0.95, 0.95, 0.95), Vector2(-0.2, -0.2))
-	_draw_shaded_circle(img, hs + 5, hs - 14, 4, Color(0.95, 0.95, 0.95), Vector2(-0.2, -0.2))
-	_draw_circle(img, hs - 5, hs - 14, 3, Color(0.12, 0.08, 0.06))
-	_draw_circle(img, hs + 5, hs - 14, 3, Color(0.12, 0.08, 0.06))
-	_draw_rect(img, hs - 6, hs - 15, 2, 2, Color(0.05, 0.05, 0.05))
-	_draw_rect(img, hs + 4, hs - 15, 2, 2, Color(0.05, 0.05, 0.05))
-	_draw_rect(img, hs - 4, hs - 15, 1, 1, Color(1, 1, 1))
-	_draw_rect(img, hs + 5, hs - 15, 1, 1, Color(1, 1, 1))
-	
-	# Bouche
-	_draw_rect(img, hs - 3, hs - 6, 6, 2, Color(0.12, 0.08, 0.06))
-	_draw_rect(img, hs - 2, hs - 6, 4, 1, Color(0.75, 0.25, 0.20))
-	
-	# Obi (ceinture vermilion)
-	_draw_rect(img, hs - 8, hs + 10, 16, 4, Color(0.85, 0.25, 0.25))
-	
-	# Hakama (pantalon)
-	_draw_gradient_rect(img, hs - 8, hs + 16, 6, 10, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
-	_draw_gradient_rect(img, hs + 2, hs + 16, 6, 10, Color(0.35, 0.25, 0.18), Color(0.22, 0.12, 0.08))
-	
-	# Tabi (chaussettes)
-	_draw_rect(img, hs - 8, hs + 24, 6, 3, Color(0.90, 0.90, 0.88))
-	_draw_rect(img, hs + 2, hs + 24, 6, 3, Color(0.90, 0.90, 0.88))
-	
-	# Katana à droite
-	_draw_gradient_rect(img, hs + 18, hs - 8, 5, 28, Color(0.85, 0.82, 0.78), Color(0.70, 0.68, 0.65))
-	_draw_rect(img, hs + 20, hs - 8, 2, 28, Color(0.92, 0.90, 0.88))
-	_draw_rect(img, hs + 16, hs - 12, 9, 6, Color(0.85, 0.25, 0.25))
-	_draw_rect(img, hs + 17, hs + 16, 7, 4, Color(0.35, 0.25, 0.18))
-	for ty in [hs + 17, hs + 19]:
-		_draw_rect(img, hs + 17, ty, 7, 1, Color(0.25, 0.15, 0.10))
-	_draw_rect(img, hs + 19, hs + 18, 3, 3, Color(0.85, 0.25, 0.25))
-	_draw_circle(img, hs + 20, hs + 18, 1, Color(0.95, 0.85, 0.20))
-	_draw_rect(img, hs + 21, hs - 10, 1, 8, Color(1.0, 1.0, 1.0))
-	_draw_rect(img, hs + 23, hs, 1, 6, Color(1.0, 1.0, 1.0))
-
-# ============================================================
-# FIN GÉNÉRATEUR DE SPRITES
-# ============================================================
+# Référence vers le générateur de sprites extrait
+var _sg := SpriteGenerator.new()
 
 # Ressources du joueur
-var _gold: int = 100
+var _gold: int = 800
 var _wood: int = 50
-var _ore: int = 25
+var _ore: int = 30
 
 func _ready() -> void:
 	rng.randomize()
 	print("=== WORLD SIZE === ", _world_w, "x", _world_h)
 	print("=== ZONE SIZE === ", _zone_w, "x", _zone_h, " (toute la map colorée)")
 	print("=== VÉRIFICATION: _play_w = ", _play_w, " _play_h = ", _play_h)
-	
 	print("=== HoMM3: Heroes of Conquest - Étape 10 : Niveau et Expérience ===")
 	print("Création de la carte avec TileMapLayer")
-	
-		
-	# Créer la carte
-	_create_map()
-	
-	# Créer les villes
+	_async_init()
+
+func _async_init() -> void:
+	await _create_map()
+	await get_tree().process_frame
+
 	_create_cities()
-	
-	# Créer les ennemis
 	_create_enemies()
-	
-	# Créer les ressources collectables
+	await get_tree().process_frame
+
 	_create_resources()
-	
-	# Créer le héros avec visuel
 	_create_hero()
-	
-	# Créer l'interface HoMM3 (inclut la minimap)
+	_hero_army = []
+	await get_tree().process_frame
+
 	_create_ui()
-	
-	# Enregistrer les entités dans GameData pour la sélection
+	_create_town_overlay()
 	_register_game_data()
-	
-	# === INITIALISATION SYSTÈMES HOMURA ===
 	_hero_mp = _hero_max_mp
 	_init_fog_of_war()
+	await get_tree().process_frame
+
+	_create_bosses()
+	_create_merchants()
 	_init_enemy_armies()
+	_init_quests()
 	_update_fog_of_war()
-	
-	# === INITIALISATION COMBAT MANAGER ===
+	_create_sky_background()
+	await get_tree().process_frame
+
 	var combat_scene := preload("res://scenes/combat_manager.tscn")
 	_combat_manager = combat_scene.instantiate()
 	_combat_manager.combat_victory.connect(_on_combat_victory)
@@ -1513,22 +97,22 @@ func _ready() -> void:
 	_combat_manager.combat_ended.connect(_on_combat_ended)
 	add_child(_combat_manager)
 	print("✓ Combat Manager initialisé")
-	
-	# Charger sauvegarde si demandé
+
 	if GameData.should_load_save:
 		_load_game()
-	
-	# Créer des créatures neutres sur la carte
+
 	_spawn_neutral_creatures()
-	
+
 	print("✓ Carte créée : ", _world_w, "x", _world_h, " tuiles")
 	print("✓ ", CITY_COUNT, " villes créées sur la carte")
-	print("✓ ", ENEMY_COUNT, " ennemis créés sur la carte")
+	print("✓ ", WANDERER_COUNT, " ennemis errants créés")
+	print("✓ ", _bosses.size(), " boss créés")
 	print("✓ ", RESOURCE_COUNT, " ressources à collecter")
 	print("✓ Arbres créés : ", TREE_COUNT, " arbres avec forêts et groupes")
 	print("✓ Rochers créés : ", ROCK_COUNT, " rochers")
 	print("✓ Effet de sélection doré autour du héros")
 	print("✓ Prêt pour l'aventure !")
+	LoadingScreen.hide_loading()
 
 func _create_map() -> void:
 	print("=== _create_map ===")
@@ -1541,25 +125,30 @@ func _create_map() -> void:
 			print("=== ANCIEN TERRAIN DÉTRUIT ===")
 	
 	# Générer l'image du terrain
-	var map_texture: ImageTexture = _generate_map_image()
+	var map_texture: ImageTexture = await _generate_map_image()
 	
 	# Créer un Sprite2D pour afficher le terrain
 	_map_sprite = Sprite2D.new()
 	_map_sprite.name = "MapSprite"
 	_map_sprite.texture = map_texture
-	_map_sprite.position = Vector2(60 * TILE_SIZE / 2, 40 * TILE_SIZE / 2)  # Centré sur la map
+	_map_sprite.position = Vector2(_zone_w * TILE_SIZE / 2, _zone_h * TILE_SIZE / 2)  # Centré sur la map
 	_map_sprite.set_z_index(-10)
+	var water_shader: Shader = load("res://shaders/water.gdshader")
+	if water_shader:
+		var mat = ShaderMaterial.new()
+		mat.shader = water_shader
+		_map_sprite.material = mat
 	add_child(_map_sprite)
 	_create_fog_overlay()
-	print("=== TERRAIN SPRITE CRÉÉ: 60×40 tuiles ===")
+	print("=== TERRAIN SPRITE CRÉÉ: ", _zone_w, "×", _zone_h, " tuiles ===")
 
-	print("Carte générée : 60×40 = 2400 tuiles")
+	print("Carte générée : ", _zone_w, "×", _zone_h, " = ", _zone_w * _zone_h, " tuiles")
 	_create_decorations()
 	_create_mountain_sprites()
 	_create_bridges()
 	_create_japanese_decorations()
 
-func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image:
+func _generate_tile_texture(tile_type: int) -> Image:
 	"""Génère une tuile de terrain 64x64 avec texture détaillée procédurale"""
 	var img: Image = Image.create(TILE_SIZE, TILE_SIZE, false, Image.FORMAT_RGBA8)
 	
@@ -1625,7 +214,7 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 				img.set_pixel(cx, cy + 1, Color(0.50, 0.48, 0.42))
 			# Mouches d'herbe fines
 			for _i in range(15):
-				var lx: int = rng.randi_range(0, TILE_SIZE - 1)
+				var lx: int = rng.randi_range(0, TILE_SIZE - 2)
 				var ly: int = rng.randi_range(0, TILE_SIZE - 1)
 				var lcol: Color = Color(0.16, 0.38, 0.12)
 				if rng.randf() < 0.5:
@@ -1687,7 +276,7 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 				img.set_pixel(dx, dy, Color(0.10, 0.34, 0.56))
 			# Bulles/écume
 			for _i in range(15):
-				var bx = rng.randi_range(0, TILE_SIZE - 1)
+				var bx = rng.randi_range(0, TILE_SIZE - 2)
 				var by = rng.randi_range(0, TILE_SIZE - 1)
 				img.set_pixel(bx, by, Color(0.20, 0.52, 0.82, 0.6))
 				img.set_pixel(bx + 1, by, Color(0.18, 0.46, 0.76, 0.4))
@@ -1727,43 +316,6 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 				img.set_pixel(mx + 1, my, Color(0.55, 0.50, 0.45))
 
 		4:  # Forêt
-			img.fill(Color(0.18, 0.35, 0.12))
-			# Arbres plus détaillés
-			for _i in range(5):
-				var tx = rng.randi_range(6, TILE_SIZE - 10)
-				var ty = rng.randi_range(6, TILE_SIZE - 10)
-				# Tronc
-				for dy in range(5):
-					img.set_pixel(tx, ty + dy, Color(0.42, 0.28, 0.15))
-					if tx + 1 < TILE_SIZE:
-						img.set_pixel(tx + 1, ty + dy, Color(0.35, 0.22, 0.12))
-				# Feuillage
-				for dx in range(-4, 5):
-					for dy in range(-4, 5):
-						if dx*dx + dy*dy < 10:
-							var fcol = Color(0.15, 0.45, 0.08)
-							if rng.randf() < 0.3:
-								fcol = Color(0.20, 0.50, 0.12)
-							img.set_pixel(tx+dx, ty+dy-2, fcol)
-			# Sol clair avec feuilles mortes
-			for _i in range(80):
-				var sx = rng.randi_range(0, TILE_SIZE - 1)
-				var sy = rng.randi_range(0, TILE_SIZE - 1)
-				img.set_pixel(sx, sy, Color(0.22, 0.38, 0.14))
-			# Champignons
-			for _i in range(3):
-				var mx = rng.randi_range(4, TILE_SIZE - 6)
-				var my = rng.randi_range(4, TILE_SIZE - 6)
-				img.set_pixel(mx, my + 1, Color(0.70, 0.65, 0.60))
-				img.set_pixel(mx, my, Color(0.85, 0.25, 0.20))
-				img.set_pixel(mx + 1, my, Color(0.80, 0.20, 0.15))
-			# Fissures sombres
-			for _i in range(3):
-				var fx: int = rng.randi_range(8, TILE_SIZE - 8)
-				for fy in range(rng.randi_range(6, 15)):
-					img.set_pixel(fx + rng.randi_range(-1, 1), rng.randi_range(4, TILE_SIZE - 4), Color(0.30, 0.28, 0.24))
-		
-		4:  # Forêt
 			img.fill(Color(0.10, 0.26, 0.08))
 			# Sous-bois plus clair par endroits
 			for _i in range(30):
@@ -1797,20 +349,20 @@ func _generate_tile_texture(tile_type: int, rng: RandomNumberGenerator) -> Image
 	return img
 
 func _generate_map_image() -> ImageTexture:
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 	rng.randomize()
 	
-	var w: int = 60
-	var h: int = 40
+	var w: int = _zone_w
+	var h: int = _zone_h
 	
 	# === COULEURS JAPONAIS MÉDIÉVAL ===
 	var C_GRASS: Color = Color(0.25, 0.42, 0.18)      # Herbe principale (bamboo green muted)
 	var C_GRASS_LIGHT: Color = Color(0.35, 0.52, 0.26)  # Herbe claire/prairie
 	var C_DIRT: Color = Color(0.52, 0.42, 0.30)        # Terre/sable (warm earth)
 	var C_WATER: Color = Color(0.15, 0.28, 0.45)       # Eau profonde (indigo)
-	var C_WATER_SHALLOW: Color = Color(0.20, 0.35, 0.52)  # Eau peu profonde
+	var _C_WATER_SHALLOW: Color = Color(0.20, 0.35, 0.52)  # Eau peu profonde
 	var C_MOUNTAIN: Color = Color(0.45, 0.42, 0.40)    # Montagne (stone gray)
-	var C_MOUNTAIN_DARK: Color = Color(0.35, 0.32, 0.30)  # Montagne sombre
+	var _C_MOUNTAIN_DARK: Color = Color(0.35, 0.32, 0.30)  # Montagne sombre
 	var C_FOREST: Color = Color(0.15, 0.28, 0.12)      # Forêt dense (deep green)
 	var C_SAND: Color = Color(0.65, 0.55, 0.42)        # Sable (bordure eau)
 	var C_ROCK: Color = Color(0.50, 0.46, 0.42)         # Roche (bordure montagne)
@@ -1818,6 +370,14 @@ func _generate_map_image() -> ImageTexture:
 	var base_colors: Array[Color] = [C_GRASS, C_DIRT, C_WATER, C_MOUNTAIN, C_FOREST, C_GRASS_LIGHT]
 	
 	# Grille de terrain (stockée globalement)
+	_terrain_move_cost = {
+		0: 1,  # Herbe
+		1: 2,  # Terre
+		2: 999,  # Eau
+		3: 3,  # Montagne
+		4: 2,  # Forêt
+		5: 1,  # Prairie
+	}
 	_terrain_grid = []
 	for x in range(w):
 		_terrain_grid.append([])
@@ -1952,7 +512,7 @@ func _generate_map_image() -> ImageTexture:
 				_terrain_grid[px][py] = 0
 	
 	# === COULEURS DE TERRAIN (plus riches et saturées) ===
-	var colors: Array[Color] = [
+	var _colors: Array[Color] = [
 		Color(0.28, 0.46, 0.18),  # 0: Herbe
 		Color(0.58, 0.48, 0.32),  # 1: Terre
 		Color(0.10, 0.28, 0.52),  # 2: Eau
@@ -1967,19 +527,23 @@ func _generate_map_image() -> ImageTexture:
 	var map_image: Image = Image.create(img_width, img_height, false, Image.FORMAT_RGBA8)
 	
 	for x in range(w):
+		if x % 20 == 0 and x > 0:
+			await get_tree().process_frame
 		for y in range(h):
 			var tx: int = x * TILE_SIZE
 			var ty: int = y * TILE_SIZE
 			var tile_type: int = _terrain_grid[x][y]
 			
 			# Générer la tuile texturée détaillée
-			var tile_img: Image = _generate_tile_texture(tile_type, rng)
+			var tile_img: Image = _generate_tile_texture(tile_type)
 			
 			# Copier la tuile sur la carte
 			for px in range(TILE_SIZE):
 				for py in range(TILE_SIZE):
 					map_image.set_pixel(tx + px, ty + py, tile_img.get_pixel(px, py))
 	
+	await get_tree().process_frame
+
 	# === TRANSITIONS DOUCES ENTRE BIOMES (pixel-perfect avec bruit) ===
 	# Pour chaque tuile, on regarde ses voisins et on crée des transitions douces
 	for x in range(w):
@@ -2044,6 +608,8 @@ func _generate_map_image() -> ImageTexture:
 								var result: Color = current_color.lerp(blend_color, alpha * 0.5)
 								map_image.set_pixel(tx + px, ty + py, result)
 	
+	await get_tree().process_frame
+
 	# === EFFET DE VIGNETTE (coins plus foncés pour l'atmosphère) ===
 	for x in range(w):
 		for y in range(h):
@@ -2064,6 +630,8 @@ func _generate_map_image() -> ImageTexture:
 						c.b = clamp(c.b - vignette, 0, 1)
 						map_image.set_pixel(tx + px, ty + py, c)
 	
+	await get_tree().process_frame
+
 	# === TEXTURATION DES ROUTES (cailloux, traces, bordures) ===
 	for x in range(w):
 		for y in range(h):
@@ -2122,6 +690,8 @@ func _generate_map_image() -> ImageTexture:
 										var gy: int = edge_py + rng.randi_range(-2, 2)
 										map_image.set_pixel(clamp(gx, tx, tx + TILE_SIZE - 1), clamp(gy, ty, ty + TILE_SIZE - 1), Color(0.24, 0.46, 0.14))
 	
+	await get_tree().process_frame
+	
 	# === BORDS DE PLAGE (sable) autour de l'eau ===
 	for x in range(w):
 		for y in range(h):
@@ -2169,6 +739,8 @@ func _generate_map_image() -> ImageTexture:
 											var sand_col: Color = Color(0.72 + rng.randf() * 0.08, 0.62 + rng.randf() * 0.06, 0.44 + rng.randf() * 0.04)
 											map_image.set_pixel(tx + px, ty + py, sand_col)
 	
+	await get_tree().process_frame
+
 	# === DÉTAILS DE SOL (hautes herbes, buissons, souches) ===
 	for x in range(w):
 		for y in range(h):
@@ -2236,12 +808,14 @@ func _generate_map_image() -> ImageTexture:
 						if rng.randf() < 0.5:
 							map_image.set_pixel(cx + 1, cy, ccol)
 	
+	await get_tree().process_frame
+	
 	print("✓ Terrain professionnel: ", img_width, "x", img_height, " avec transitions douces, routes texturées, plages et détails de sol")
 	return ImageTexture.create_from_image(map_image)
 
 func _create_decorations() -> void:
 	# Créer des arbres et rochers sur la carte pour la rendre plus vivante
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 	rng.randomize()
 	
 	# === NOUVEAU SYSTÈME ARBRES : images individuelles avec 2 arbres par image ===
@@ -2264,6 +838,11 @@ func _create_decorations() -> void:
 		var tex: Texture2D = load(f)
 		if tex != null:
 			tree_textures.append(tex)
+	var use_procedural: bool = tree_textures.is_empty()
+	if use_procedural:
+		print("⚠ Arbres externes non trouvés, fallback procédural")
+		for c in range(10):
+			tree_textures.append(_sg._generate_sprite("tree", 112, c * 1337))
 	
 	# === CRÉER DES VRAIES FORÊTS ET ARBRES SOLITAIRES ===
 	# Grille pour tracker les positions occupées (éviter les superpositions)
@@ -2337,7 +916,7 @@ func _create_decorations() -> void:
 				tree_sprite.set_z_index(int(offset_y))
 				tree_node.add_child(tree_sprite)
 				
-				_create_elliptical_shadow(tree_node, 24, 8, 6, 0.22)
+				_sg._create_elliptical_shadow(tree_node, 24, 8, 6, 0.22)
 				_decorations.append(tree_node)
 				placed += 1
 			
@@ -2346,7 +925,7 @@ func _create_decorations() -> void:
 				var forest_shadow: Node2D = Node2D.new()
 				forest_shadow.position = Vector2(center_x * TILE_SIZE + TILE_SIZE / 2, center_y * TILE_SIZE + TILE_SIZE / 2)
 				add_child(forest_shadow)
-				_create_elliptical_shadow(forest_shadow, 90, 32, 14, 0.12)
+				_sg._create_elliptical_shadow(forest_shadow, 90, 32, 14, 0.12)
 				_decorations.append(forest_shadow)
 		
 		elif is_group:
@@ -2386,7 +965,7 @@ func _create_decorations() -> void:
 				tree_sprite.position = Vector2(rng.randf_range(-12.0, 12.0), rng.randf_range(-8.0, 4.0) - target_h * 0.35)
 				tree_node.add_child(tree_sprite)
 				
-				_create_elliptical_shadow(tree_node, 26, 9, 7, 0.24)
+				_sg._create_elliptical_shadow(tree_node, 26, 9, 7, 0.24)
 				_decorations.append(tree_node)
 				placed += 1
 		
@@ -2415,7 +994,7 @@ func _create_decorations() -> void:
 				tree_sprite.position = Vector2(0, -target_h * 0.35)
 				tree_node.add_child(tree_sprite)
 				
-				_create_elliptical_shadow(tree_node, 28, 10, 8, 0.26)
+				_sg._create_elliptical_shadow(tree_node, 28, 10, 8, 0.26)
 				_decorations.append(tree_node)
 	
 	# Créer des rochers (dans la zone colorée 16×9)
@@ -2434,12 +1013,12 @@ func _create_decorations() -> void:
 		
 		# Sprite procédural rocher
 		var rock_sprite: Sprite2D = Sprite2D.new()
-		rock_sprite.texture = _generate_sprite("rock", 96, rock_x * 1000 + rock_y)
+		rock_sprite.texture = _sg._generate_sprite("rock", 96, rock_x * 1000 + rock_y)
 		rock_sprite.position = Vector2(0, -24)
 		rock_node.add_child(rock_sprite)
 
 		# Ombre elliptique sous le rocher
-		_create_elliptical_shadow(rock_node, 28, 10, 8, 0.30)
+		_sg._create_elliptical_shadow(rock_node, 28, 10, 8, 0.30)
 		
 		_decorations.append(rock_node)
 	
@@ -2459,45 +1038,100 @@ func _create_decorations() -> void:
 		
 		# Sprite procédural tour
 		var tower_sprite: Sprite2D = Sprite2D.new()
-		tower_sprite.texture = _generate_sprite("tower", 96, tower_x * 1000 + tower_y)
+		tower_sprite.texture = _sg._generate_sprite("tower", 96, tower_x * 1000 + tower_y)
 		tower_sprite.position = Vector2(0, -24)
 		tower_node.add_child(tower_sprite)
 		
 		# Ombre elliptique sous la tour
-		_create_elliptical_shadow(tower_node, 48, 14, 16, 0.35)
+		_sg._create_elliptical_shadow(tower_node, 48, 14, 16, 0.35)
 		
 		_decorations.append(tower_node)
 	
 	print("✓ ", TREE_COUNT, " arbres, ", ROCK_COUNT, " rochers et ", TOWER_COUNT, " tours créés")
 
+func _extract_building_texture(sheet_texture: Texture2D, index: int) -> Texture2D:
+	var sheet_img: Image = sheet_texture.get_image()
+	var col: int = index % 4
+	var row: int = index / 4
+	var cell_x: int = col * 256
+	var cell_y: int = row * 341
+
+	# Auto-crop : trouver la boîte englobante des pixels non-transparents
+	var min_x: int = 256
+	var min_y: int = 341
+	var max_x: int = 0
+	var max_y: int = 0
+
+	for y in range(cell_y, cell_y + 341):
+		for x in range(cell_x, cell_x + 256):
+			if sheet_img.get_pixel(x, y).a > 0.02:
+				if x < min_x: min_x = x
+				if y < min_y: min_y = y
+				if x > max_x: max_x = x
+				if y > max_y: max_y = y
+
+	# Fallback si aucun pixel trouvé
+	if max_x == 0:
+		var fb_x: int = cell_x + 6
+		var fb_y: int = cell_y + 6
+		var fb_w: int = 256 - 12
+		var fb_h: int = 341 - 12
+		var fb_img: Image = Image.create(fb_w, fb_h, false, Image.FORMAT_RGBA8)
+		fb_img.blit_rect(sheet_img, Rect2i(fb_x, fb_y, fb_w, fb_h), Vector2i.ZERO)
+		return ImageTexture.create_from_image(fb_img)
+
+	var crop_w: int = max_x - min_x + 1
+	var crop_h: int = max_y - min_y + 1
+	var trimmed: Image = Image.create(crop_w, crop_h, false, Image.FORMAT_RGBA8)
+	trimmed.blit_rect(sheet_img, Rect2i(min_x, min_y, crop_w, crop_h), Vector2i.ZERO)
+	return ImageTexture.create_from_image(trimmed)
+
+func _create_building_shadow(parent: Node2D, width: float, height: float, alpha: float = 0.25) -> void:
+	"""Ajoute une ombre portée elliptique sous un bâtiment."""
+	var shadow: ColorRect = ColorRect.new()
+	shadow.size = Vector2(width, height)
+	shadow.position = Vector2(-width * 0.5, -height * 0.5)
+	shadow.color = Color(0, 0, 0, alpha)
+	shadow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var shadow_style = StyleBoxFlat.new()
+	shadow_style.bg_color = Color(0, 0, 0, alpha)
+	shadow_style.corner_radius_top_left = int(height * 0.5)
+	shadow_style.corner_radius_top_right = int(height * 0.5)
+	shadow_style.corner_radius_bottom_left = int(height * 0.5)
+	shadow_style.corner_radius_bottom_right = int(height * 0.5)
+	shadow.add_theme_stylebox_override("panel", shadow_style)
+	shadow.set_z_index(-1)
+	parent.add_child(shadow)
+
 func _create_japanese_decorations() -> void:
 	"""Crée des éléments décoratifs japonais : torii, cerisiers, lanternes, temples"""
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 	rng.randomize()
 	
 	# Charger le sprite sheet de bâtiments japonais
 	var japanese_sheet: Texture2D = load("res://assets/bat.png")
 	
 	# Nombre d'éléments japonais
-	const TORII_COUNT: int = 3
-	const SAKURA_COUNT: int = 8
-	const LANTERN_COUNT: int = 10
-	const SHRINE_COUNT: int = 2
-	const BUILDING_COUNT: int = 6
+	const TORII_COUNT: int = 8
+	const SAKURA_COUNT: int = 20
+	const LANTERN_COUNT: int = 24
+	const SHRINE_COUNT: int = 5
+	const BUILDING_COUNT: int = 14
 	
 		# === BÂTIMENTS JAPONAIS DU SPRITE SHEET ===
 	if japanese_sheet != null:
-		var sheet_size: Vector2 = japanese_sheet.get_size()
-		var cols: int = 4
-		var rows: int = 3
-		var building_width: float = sheet_size.x / cols
-		var building_height: float = sheet_size.y / rows
-		var margin_x: float = building_width * 0.05
-		var margin_y: float = building_height * 0.05
-		
+		var _excluded_terrains: Array = [2, 3]  # éviter eau et marécage
 		for i in range(BUILDING_COUNT):
-			var tx: int = rng.randi_range(3, _zone_w - 4)
-			var ty: int = rng.randi_range(3, _zone_h - 4)
+			var tx: int
+			var ty: int
+			var attempts: int = 0
+			while attempts < 20:
+				tx = rng.randi_range(3, _zone_w - 4)
+				ty = rng.randi_range(3, _zone_h - 4)
+				if tx < _terrain_grid.size() and ty < _terrain_grid[tx].size():
+					if not _excluded_terrains.has(_terrain_grid[tx][ty]):
+						break
+				attempts += 1
 			var world_x: float = (tx * TILE_SIZE) + TILE_SIZE / 2
 			var world_y: float = (ty * TILE_SIZE) + TILE_SIZE / 2
 			
@@ -2506,21 +1140,24 @@ func _create_japanese_decorations() -> void:
 			building_node.position = Vector2(world_x, world_y)
 			add_child(building_node)
 			
-			var col: int = i % cols
-			var row: int = i / cols
+			# Ombre portée elliptique
+			_create_building_shadow(building_node, 80, 20, 0.20)
 			
-			var atlas: AtlasTexture = AtlasTexture.new()
-			atlas.atlas = japanese_sheet
-			atlas.region = Rect2(col * building_width + margin_x, row * building_height + margin_y, building_width - margin_x * 2, building_height - margin_y * 2)
-			
+			# Extraction pixel-parfaite du sprite
+			var building_texture: Texture2D = _extract_building_texture(japanese_sheet, i)
 			var building_sprite: Sprite2D = Sprite2D.new()
-			building_sprite.texture = atlas
+			building_sprite.texture = building_texture
 			building_sprite.scale = Vector2(1.5, 1.5)
 			building_sprite.position = Vector2(0, -32)
 			building_node.add_child(building_sprite)
 			
 			building_node.set_z_index(-7)
 			_japanese_buildings.append(building_node)
+			_japanese_building_data.append({
+				"node": building_node,
+				"sprite": building_sprite,
+				"base_y": building_sprite.position.y
+			})
 		
 		print("✓ Bâtiments japonais créés : ", BUILDING_COUNT)
 	else:
@@ -2660,6 +1297,23 @@ func _create_japanese_decorations() -> void:
 		light.color = Color(1.0, 0.95, 0.7)
 		lantern_node.add_child(light)
 		
+		# Halo lumineux (ambiance)
+		var glow_img: Image = Image.create(40, 40, false, Image.FORMAT_RGBA8)
+		glow_img.fill(Color(0, 0, 0, 0))
+		for gx in range(40):
+			for gy in range(40):
+				var gdist: float = sqrt((gx - 20)**2 + (gy - 20)**2)
+				if gdist < 18:
+					var galpha: float = (1.0 - gdist / 18.0) * 0.20
+					glow_img.set_pixel(gx, gy, Color(1.0, 0.9, 0.5, galpha))
+		var glow: Sprite2D = Sprite2D.new()
+		glow.texture = ImageTexture.create_from_image(glow_img)
+		glow.position = Vector2(0, -14)
+		glow.name = "LanternGlow"
+		glow.set_z_index(-1)
+		lantern_node.add_child(glow)
+		_lantern_glows.append(glow)
+		
 		lantern_node.set_z_index(-4)
 	
 	# === PETITS SANCTUAIRES ===
@@ -2712,36 +1366,120 @@ func _create_japanese_decorations() -> void:
 	
 	print("✓ Éléments japonais créés : ", TORII_COUNT, " torii, ", SAKURA_COUNT, " cerisiers, ", LANTERN_COUNT, " lanternes, ", SHRINE_COUNT, " sanctuaires")
 
-func _create_cherry_blossom_particles() -> void:
-	"""Crée des particules de pétales de cerisier qui tombent"""
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	rng.randomize()
+	# === LUEUR DES BÂTIMENTS (ambiance lumineuse) ===
+	# Ajoute un halo doux autour de chaque bâtiment japonais
+	for building_node in _japanese_buildings:
+		var bg_img: Image = Image.create(60, 60, false, Image.FORMAT_RGBA8)
+		bg_img.fill(Color(0, 0, 0, 0))
+		for gx in range(60):
+			for gy in range(60):
+				var gdist: float = sqrt((gx - 30)**2 + (gy - 30)**2)
+				if gdist < 25:
+					var galpha: float = (1.0 - gdist / 25.0) * 0.06
+					bg_img.set_pixel(gx, gy, Color(1.0, 0.95, 0.7, galpha))
+		var building_glow: Sprite2D = Sprite2D.new()
+		building_glow.texture = ImageTexture.create_from_image(bg_img)
+		building_glow.position = Vector2(0, -20)
+		building_glow.name = "BuildingGlow"
+		building_node.add_child(building_glow)
 	
-	for i in range(50):
+	# === LUCIOLES ===
+	_create_fireflies()
+	
+	# === PÉTALES DE CERISIER ===
+	_create_cherry_blossom_particles()
+	
+	# === PARTICULES AMBIANTES (poussières lumineuses) ===
+	_create_light_motes()
+
+func _create_cherry_blossom_particles() -> void:
+	"""Crée des particules de pétales de cerisier qui tombent - version améliorée"""
+
+	rng.randomize()
+	var view_w := _world_w * TILE_SIZE
+	var view_h := _world_h * TILE_SIZE
+	
+	for i in range(24):
 		var petal: ColorRect = ColorRect.new()
 		petal.name = "Petal_" + str(i)
-		petal.size = Vector2(4, 4)
-		petal.color = Color(1.0, 0.8, 0.9) if i % 2 == 0 else Color(0.9, 0.6, 0.8)
+		var petal_size := rng.randf_range(5, 9)
+		petal.size = Vector2(petal_size, petal_size * rng.randf_range(1.3, 2.0))
+		var pink_shade := rng.randf_range(0.5, 0.9)
+		petal.color = Color(0.95, pink_shade, pink_shade * 0.75, rng.randf_range(0.3, 0.6))
 		
-		var start_x: float = rng.randf_range(0, _world_w * TILE_SIZE)
-		var start_y: float = rng.randf_range(0, _world_h * TILE_SIZE)
+		var start_x: float = rng.randf_range(0, view_w)
+		var start_y: float = rng.randf_range(-20, view_h)
 		petal.position = Vector2(start_x, start_y)
+		petal.rotation = rng.randf() * TAU
+		petal.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		
 		add_child(petal)
 		_petals.append({
 			"node": petal,
-			"speed_y": rng.randf_range(0.5, 1.5),
-			"speed_x": rng.randf_range(-0.3, 0.3),
-			"rotation": rng.randf_range(-0.1, 0.1),
-			"rotation_speed": rng.randf_range(-0.05, 0.05)
+			"speed_y": rng.randf_range(12, 28),
+			"speed_x": rng.randf_range(3, 10) * (1 if rng.randf() > 0.3 else -1),
+			"rotation": petal.rotation,
+			"rotation_speed": rng.randf_range(0.3, 0.8) * (1 if rng.randf() > 0.5 else -1),
+			"phase": rng.randf() * TAU,
+			"offset": rng.randf() * TAU,
 		})
 	
-	print("✓ Particules de pétales de cerisier créées : 50")
+	print("✓ Particules de pétales de cerisier : 24")
+
+func _create_fireflies() -> void:
+	"""Crée des lucioles près des bâtiments et villes pour l'ambiance"""
+
+	rng.randomize()
+	var firefly_positions: Array = []
+	for b in _japanese_buildings:
+		firefly_positions.append(b.position)
+	for c in _cities:
+		firefly_positions.append(c)
+	for _i in range(12):
+		if firefly_positions.is_empty():
+			break
+		var origin: Vector2 = firefly_positions[rng.randi() % firefly_positions.size()]
+		var firefly: ColorRect = ColorRect.new()
+		firefly.name = "Firefly_" + str(_i)
+		firefly.size = Vector2(3, 3)
+		firefly.color = Color(1.0, 0.95, 0.6)
+		firefly.position = origin + Vector2(rng.randf_range(-80, 80), rng.randf_range(-60, 40))
+		firefly.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(firefly)
+		_fireflies.append({
+			"node": firefly,
+			"base": firefly.position,
+			"phase": rng.randf() * TAU,
+			"speed": rng.randf_range(0.3, 0.8),
+			"radius": rng.randf_range(8, 24),
+			"blink_speed": rng.randf_range(2.0, 5.0),
+		})
+	print("✓ Lucioles créées : ", _fireflies.size())
+
+func _create_light_motes() -> void:
+	var view_w := _world_w * TILE_SIZE
+	var view_h := _world_h * TILE_SIZE
+	for i in range(8):
+		var mote := ColorRect.new()
+		mote.name = "LightMote_%d" % i
+		mote.size = Vector2(3, 3)
+		mote.color = Color(1.0, 0.95, 0.8, 0.15)
+		mote.position = Vector2(randf_range(0, view_w), randf_range(0, view_h))
+		mote.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(mote)
+		_light_motes.append({
+			"node": mote,
+			"base": mote.position,
+			"speed": randf_range(3, 8),
+			"drift": randf_range(0.2, 0.6),
+			"phase": randf() * TAU,
+			"size": randf_range(2, 5),
+		})
 
 func _create_mountain_sprites() -> void:
 	# Créer des sprites de montagnes sur les tuiles montagne (type 3)
 	# Les montagnes débordent sur les tuiles voisines pour un effet imposant
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 	rng.randomize()
 	
 	# Collecter toutes les positions montagne
@@ -2815,13 +1553,13 @@ func _create_mountain_sprites() -> void:
 		mountain_node.add_child(m_sprite)
 		
 		# Ombre sous la montagne
-		_create_elliptical_shadow(mountain_node, 34, 10, 8, 0.30)
+		_sg._create_elliptical_shadow(mountain_node, 34, 10, 8, 0.30)
 		
 		_decorations.append(mountain_node)
 
 func _create_bridges() -> void:
 	# Détecter où les routes (type 1) croisent l'eau (type 2) et placer des ponts
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 	rng.randomize()
 	
 	for x in range(1, _zone_w - 1):
@@ -2905,9 +1643,35 @@ func _create_bridges() -> void:
 	# Créer les coffres au trésor
 	_create_treasures()
 
+func _create_sky_background() -> void:
+	var sky_tex := ImageTexture.create_from_image(_generate_sky_image())
+	_sky_sprite = Sprite2D.new()
+	_sky_sprite.name = "SkyBackground"
+	_sky_sprite.texture = sky_tex
+	_sky_sprite.z_index = -20
+	_sky_sprite.position = Vector2(_world_w * TILE_SIZE / 2, _world_h * TILE_SIZE / 2)
+	var sky_shader := load("res://shaders/sky.gdshader")
+	if sky_shader:
+		var mat := ShaderMaterial.new()
+		mat.shader = sky_shader
+		_sky_sprite.material = mat
+	add_child(_sky_sprite)
+
+func _generate_sky_image() -> Image:
+	var w := _world_w * TILE_SIZE
+	var h := _world_h * TILE_SIZE
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var top := Color(0.15, 0.22, 0.40)
+	var bottom := Color(0.55, 0.70, 0.85)
+	for y in range(h):
+		var t := float(y) / float(h)
+		var c := top.lerp(bottom, t)
+		img.fill_rect(Rect2i(0, y, w, 1), c)
+	return img
+
 func _create_treasures() -> void:
 	# Créer des coffres au trésor contenant des récompenses
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 	rng.randomize()
 	
 	for i in range(TREASURE_COUNT):
@@ -2934,12 +1698,12 @@ func _create_treasures() -> void:
 		
 		# Sprite procédural coffre
 		var chest_sprite: Sprite2D = Sprite2D.new()
-		chest_sprite.texture = _generate_sprite("chest", 64, chest_x * 1000 + chest_y)
+		chest_sprite.texture = _sg._generate_sprite("chest", 64, chest_x * 1000 + chest_y)
 		chest_sprite.position = Vector2(0, -8)
 		chest_node.add_child(chest_sprite)
 		
 		# Ombre elliptique sous le coffre
-		_create_elliptical_shadow(chest_node, 36, 12, 8, 0.35)
+		_sg._create_elliptical_shadow(chest_node, 36, 12, 8, 0.35)
 		
 		# Glow doré autour du coffre (effet de trésor)
 		var chest_glow: Image = Image.create(48, 48, false, Image.FORMAT_RGBA8)
@@ -2967,44 +1731,82 @@ func _create_hero() -> void:
 	# Supprimer l'ancien héros s'il existe (éviter les doublons)
 	if _hero != null:
 		_hero.queue_free()
+		_heroes_data.clear()
 		_hero = null
 	
-	# Créer le héros comme un Node2D
-	_hero = Node2D.new()
-	_hero.name = "Hero"
-	add_child(_hero)
-
-	# Positionner le héros au centre de la zone colorée en haut à gauche
-	var center_tile_x: int = _zone_w / 2
-	var center_tile_y: int = _zone_h / 2
-	var hero_world_x: float = (center_tile_x * TILE_SIZE) + TILE_SIZE / 2
-	var hero_world_y: float = (center_tile_y * TILE_SIZE) + TILE_SIZE / 2
-	_hero.position = Vector2(hero_world_x, hero_world_y)
+	_heroes_data = []
+	var hero_name: String = GameData.hero_name if GameData.hero_name != "" else "Samurai"
 	
-	# === VISUEL DU HÉROS avec sprites LPC ===
+	# Positionner le héros loin des villes (coin opposé de la carte)
+	var spawn_pos: Vector2 = Vector2(_zone_w / 2 * TILE_SIZE + TILE_SIZE / 2, _zone_h / 2 * TILE_SIZE + TILE_SIZE / 2)
+	if not _cities_data.is_empty():
+		var avg_x: float = 0
+		var avg_y: float = 0
+		for cd in _cities_data:
+			var ct: Vector2i = Vector2i(int(cd["position"].x / TILE_SIZE), int(cd["position"].y / TILE_SIZE))
+			avg_x += ct.x
+			avg_y += ct.y
+		avg_x /= _cities_data.size()
+		avg_y /= _cities_data.size()
+		var spawn_tile: Vector2i = Vector2i(
+			clampi(_zone_w - int(avg_x) - 5, 3, _zone_w - 4),
+			clampi(_zone_h - int(avg_y) - 5, 3, _zone_h - 4)
+		)
+		var safety: int = 0
+		while (_terrain_move_cost.get(_terrain_grid[spawn_tile.x][spawn_tile.y], 1) >= 999 or safety < 10):
+			spawn_tile = Vector2i(rng.randi_range(3, _zone_w - 4), rng.randi_range(3, _zone_h - 4))
+			safety += 1
+		spawn_pos = Vector2(spawn_tile.x * TILE_SIZE + TILE_SIZE / 2, spawn_tile.y * TILE_SIZE + TILE_SIZE / 2)
+		print("Héros spawn loin des villes à : ", spawn_tile)
+	
+	# Créer le héros principal (index 0)
+	_active_hero_index = 0
+	var main_node: Node2D = Node2D.new()
+	main_node.name = "Hero"
+	main_node.position = spawn_pos
+	add_child(main_node)
+	_hero = main_node
 	_create_hero_sprites()
 	
+	_heroes_data.append({
+		"name": hero_name,
+		"hp": _hero_hp, "max_hp": _hero_max_hp,
+		"attack": _hero_attack, "defense": _hero_defense,
+		"mp": _hero_max_mp, "max_mp": _hero_max_mp,
+		"level": 1, "xp": 0,
+		"node": main_node,
+		"position": spawn_pos,
+		"unlocked": true,
+	})
+	
+	# Créer les nodes pour les héros débloqués (invisibles au début)
+	for h_unlock in _unlocked_heroes:
+		_add_unlocked_hero_node(h_unlock)
+	
+	_update_hud_hero_buttons()
+	
 func _create_hero_sprites() -> void:
-	"""Crée le héros avec le sprite HoMM3 knight"""
-	# Charger le sprite knight
-	var knight_path: String = "res://assets/units/knight.png"
-	var texture: Texture2D = load(knight_path) if ResourceLoader.exists(knight_path) else null
+	"""Crée le héros avec l'image personnalisée perso.jpg"""
+	var texture: Texture2D = load("res://assets/heroes/perso.jpg")
 	
 	if texture:
 		var sprite: Sprite2D = Sprite2D.new()
-		sprite.name = "KnightSprite"
+		sprite.name = "HeroSprite"
 		sprite.texture = texture
-		sprite.scale = Vector2(2.0, 2.0)  # Agrandir si nécessaire
-		sprite.position = Vector2(0, -16)  # Légèrement au-dessus du centre
+		var tex_size: Vector2 = texture.get_size()
+		var target_h: float = 56.0
+		sprite.scale = Vector2(target_h / tex_size.y, target_h / tex_size.y)
+		sprite.position = Vector2(0, -target_h / 2)
 		_hero.add_child(sprite)
-		print("✓ Héros créé avec sprite HoMM3 knight")
+		print("✓ Héros créé avec perso.jpg")
 	else:
-		# Fallback : sprite héros procédural
 		var fallback: Sprite2D = Sprite2D.new()
-		fallback.texture = _generate_sprite("hero", 64, 42)
+		fallback.texture = _sg._generate_sprite("hero", 64, 42)
 		fallback.position = Vector2(0, -16)
 		_hero.add_child(fallback)
-		print("⚠ Sprite knight non trouvé, fallback procédural")
+		print("⚠ perso.jpg non trouvé, fallback procédural")
+	
+	_make_hero_label()
 	
 	# === HALO LUMINEUX AUTOUR DU HÉROS ===
 	var glow_texture: Image = Image.create(80, 80, false, Image.FORMAT_RGBA8)
@@ -3043,17 +1845,31 @@ func _create_hero_sprites() -> void:
 		var cy: float = -32 if corner < 2 else 26
 		corner_marker.position = Vector2(cx, cy)
 		corner_marker.color = Color(1.0, 0.75, 0.15)
-		_hero.add_child(corner_marker)
 		corner_marker.set_z_index(-1)
+		_hero.add_child(corner_marker)
+
+	# Hero HP bar on world map
+	var hero_hp_bg: ColorRect = ColorRect.new()
+	hero_hp_bg.name = "HeroHPBG"
+	hero_hp_bg.position = Vector2(-20, 24)
+	hero_hp_bg.size = Vector2(40, 5)
+	hero_hp_bg.color = Color(0.08, 0.08, 0.08)
+	_hero.add_child(hero_hp_bg)
+
+	var hero_hp_fill: ColorRect = ColorRect.new()
+	hero_hp_fill.name = "HeroHPFill"
+	hero_hp_fill.position = Vector2(-20, 24)
+	hero_hp_fill.size = Vector2(40, 5)
+	hero_hp_fill.color = Color(0.2, 0.7, 0.3)
+	_hero.add_child(hero_hp_fill)
 	
-	# Créer la caméra centrée sur la zone colorée (centre de la map 60×40)
-	var cam_x: float = (_zone_w / 2.0) * TILE_SIZE  # Centre de la zone 60×40
-	var cam_y: float = (_zone_h / 2.0) * TILE_SIZE
+	# Créer la caméra centrée sur le héros
 	_camera = Camera2D.new()
-	_camera.position = Vector2(cam_x, cam_y)
-	_camera.enabled = true
-	_camera.position_smoothing_enabled = false
+	_camera.position = _hero.position
+	_camera.position_smoothing_enabled = true
+	_camera.position_smoothing_speed = 8.0
 	add_child(_camera)
+	_camera.make_current()
 	
 	var zone_width_pixels: float = _zone_w * TILE_SIZE
 	var zone_height_pixels: float = _zone_h * TILE_SIZE
@@ -3071,10 +1887,140 @@ func _create_hero_sprites() -> void:
 	# Créer l'indicateur de portée de déplacement
 	_create_movement_indicator()
 
-func _add_sprite_layer(parent: Node2D, texture_path: String, name: String) -> void:
+func _make_hero_label() -> void:
+	var hero_label: Label = Label.new()
+	hero_label.name = "HeroLabel"
+	hero_label.text = _get_active_hero_name()
+	hero_label.add_theme_font_size_override("font_size", 9)
+	hero_label.add_theme_color_override("font_color", Color(0.95, 0.90, 0.80))
+	hero_label.position = Vector2(-24, 26)
+	hero_label.size = Vector2(48, 14)
+	hero_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hero.add_child(hero_label)
+
+func _get_active_hero_name() -> String:
+	if _active_hero_index >= 0 and _active_hero_index < _heroes_data.size():
+		return _heroes_data[_active_hero_index].get("name", "Heros")
+	return "Heros"
+
+func _add_unlocked_hero_node(h_unlock: Dictionary) -> void:
+	var h_node: Node2D = Node2D.new()
+	h_node.name = "HeroUnlocked_" + h_unlock.get("name", "unknown")
+	h_node.position = _hero.position + Vector2(rng.randi_range(-100, 100), rng.randi_range(-100, 100))
+	add_child(h_node)
+	h_node.visible = true
+
+	var hero_idx: int = _heroes_data.size()
+	var hero_colors: Array[Color] = [
+		Color(1.0, 1.0, 1.0),
+		Color(0.6, 0.8, 1.0),
+		Color(1.0, 0.8, 0.5),
+		Color(1.0, 0.6, 1.0),
+	]
+	_add_hero_sprite(h_node, hero_colors[hero_idx % hero_colors.size()])
+
+	_heroes_data.append({
+		"name": h_unlock.get("name", "Heros"),
+		"hp": h_unlock.get("hp", 80), "max_hp": h_unlock.get("max_hp", 80),
+		"attack": h_unlock.get("attack", 12), "defense": h_unlock.get("defense", 8),
+		"mp": 20, "max_mp": 20,
+		"level": 1, "xp": 0,
+		"node": h_node,
+		"position": h_node.position,
+		"unlocked": true,
+	})
+	print("★ Héros débloqué ajouté: ", h_unlock.get("name", "?"))
+
+func _add_hero_sprite(hero_node: Node2D, tint: Color) -> void:
+	var knight_path: String = "res://assets/units/knight.png"
+	var texture: Texture2D = load(knight_path) if ResourceLoader.exists(knight_path) else null
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.name = "KnightSprite"
+	if texture:
+		sprite.texture = texture
+		sprite.scale = Vector2(2.0, 2.0)
+	else:
+		sprite.texture = _sg._generate_sprite("hero", 64, 42)
+	sprite.position = Vector2(0, -16)
+	sprite.modulate = tint
+	hero_node.add_child(sprite)
+
+	var hero_label: Label = Label.new()
+	hero_label.name = "HeroLabel"
+	hero_label.add_theme_font_size_override("font_size", 9)
+	hero_label.add_theme_color_override("font_color", Color(0.95, 0.90, 0.80))
+	hero_label.position = Vector2(-24, 26)
+	hero_label.size = Vector2(48, 14)
+	hero_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hero_node.add_child(hero_label)
+
+	var hero_hp_bg: ColorRect = ColorRect.new()
+	hero_hp_bg.name = "HeroHPBG"
+	hero_hp_bg.position = Vector2(-20, 24)
+	hero_hp_bg.size = Vector2(40, 5)
+	hero_hp_bg.color = Color(0.08, 0.08, 0.08)
+	hero_node.add_child(hero_hp_bg)
+
+	var hero_hp_fill: ColorRect = ColorRect.new()
+	hero_hp_fill.name = "HeroHPFill"
+	hero_hp_fill.position = Vector2(-20, 24)
+	hero_hp_fill.size = Vector2(40, 5)
+	hero_hp_fill.color = Color(0.2, 0.7, 0.3)
+	hero_node.add_child(hero_hp_fill)
+
+func _switch_hero(index: int) -> void:
+	if index < 0 or index >= _heroes_data.size():
+		return
+	_camera_follow_hero = true
+	if index == _active_hero_index:
+		if _camera:
+			_camera.position = _hero.position
+		return
+	if _merchant_screen_open:
+		_close_merchant_screen()
+	if _town_screen_open:
+		_close_town_screen()
+	var old_idx: int = _active_hero_index
+	if old_idx >= 0 and old_idx < _heroes_data.size():
+		_heroes_data[old_idx]["position"] = _hero.position
+	
+	_active_hero_index = index
+	_hero = _heroes_data[index]["node"]
+	_hero.position = _heroes_data[index].get("position", _hero.position)
+	
+	_hero_hp = _heroes_data[index].get("hp", _hero_hp)
+	_hero_max_hp = _heroes_data[index].get("max_hp", _hero_max_hp)
+	_hero_attack = _heroes_data[index].get("attack", _hero_attack)
+	_hero_defense = _heroes_data[index].get("defense", _hero_defense)
+	_hero_mp = _heroes_data[index].get("mp", _hero_mp)
+	_hero_max_mp = _heroes_data[index].get("max_mp", _hero_max_mp)
+	
+	var label: Label = _hero.get_node_or_null("HeroLabel")
+	if label:
+		label.text = _get_active_hero_name()
+	
+	if _camera:
+		_camera.position = _hero.position
+	
+	if _movement_indicator:
+		_movement_indicator.queue_free()
+		_movement_indicator = null
+	_create_movement_indicator()
+	
+	print("Héros changé: ", _get_active_hero_name())
+
+func _update_hud_hero_buttons() -> void:
+	if not _hud:
+		return
+	var names: Array = []
+	for h in _heroes_data:
+		names.append(h.get("name", "Heros"))
+	_hud.set_hero_names(names)
+
+func _add_sprite_layer(parent: Node2D, texture_path: String, layer_name: String) -> void:
 	"""Ajoute une couche de sprite"""
 	var sprite: Sprite2D = Sprite2D.new()
-	sprite.name = name
+	sprite.name = layer_name
 	
 	# Charger la texture
 	var texture: Texture2D = load(texture_path) if ResourceLoader.exists(texture_path) else null
@@ -3124,74 +2070,15 @@ func _create_movement_indicator() -> void:
 	print("✓ Indicateur de portée créé (", move_range, " tuiles)")
 
 func _input(event: InputEvent) -> void:
-	if _in_combat or _town_screen_open or _game_over_active:
+	if _in_combat or _town_screen_open or _merchant_screen_open or _game_over_active:
 		return
-	# Déplacer le héros avec les clics de souris (système HoMM3 avec MP)
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if _hero_mp <= 0:
-			print("⛔ Plus de Points de Mouvement ! Finissez le tour.")
-			_create_floating_text("Pas de MP !", Color(0.9, 0.2, 0.2), _hero.position)
-			return
-		
-		var mouse_pos: Vector2 = get_global_mouse_position()
-		var tile_x: int = int(mouse_pos.x / TILE_SIZE)
-		var tile_y: int = int(mouse_pos.y / TILE_SIZE)
-		tile_x = clamp(tile_x, 0, _zone_w - 1)
-		tile_y = clamp(tile_y, 0, _zone_h - 1)
-		
-		# Position actuelle du héros en tuiles
-		var current_tile_x: int = int(_hero.position.x / TILE_SIZE)
-		var current_tile_y: int = int(_hero.position.y / TILE_SIZE)
-		
-		# Vérifier que le déplacement est adjacent (1 tuile max, pas de téléportation)
-		var dx: int = abs(tile_x - current_tile_x)
-		var dy: int = abs(tile_y - current_tile_y)
-		if dx > 1 or dy > 1:
-			print("⛔ Déplacement trop loin ! Déplacez-vous d'une tuile à la fois.")
-			return
-		
-		# Vérifier le type de terrain et le coût
-		var target_terrain: int = _terrain_grid[tile_x][tile_y]
-		var move_cost: int = _terrain_move_cost.get(target_terrain, 1)
-		
-		if move_cost >= 999:
-			print("⛔ Impossible de marcher sur l'eau !")
-			return
-		
-		if _hero_mp < move_cost:
-			print("⛔ Pas assez de MP ! Coût: ", move_cost, " | MP restants: ", _hero_mp)
-			_create_floating_text("MP insuffisants !", Color(0.9, 0.2, 0.2), _hero.position)
-			return
-		
-		# Payer le coût de déplacement
-		_hero_mp -= move_cost
-		print("🚶 Déplacement: -", move_cost, " MP | MP restants: ", _hero_mp, "/", _hero_max_mp)
-		
-		# Déplacer le héros
-		var grid_pos: Vector2 = Vector2(
-			tile_x * TILE_SIZE + TILE_SIZE / 2,
-			tile_y * TILE_SIZE + TILE_SIZE / 2
-		)
-		_hero.position = grid_pos
-		_camera.position = grid_pos
-		
-		if _movement_indicator:
-			_movement_indicator.position = grid_pos
-		
-		# Mettre à jour le brouillard de guerre
-		_update_fog_of_war()
-		
-		# Vérifier les interactions
-		_update_minimap()
-		_check_city_visit()
-		_check_enemy_encounter()
-		_check_resource_collection()
-		_check_treasure_collection()
-		_clamp_camera_to_map()
-		
-		# Mettre à jour l'UI
-		_update_resource_labels()
-	
+
+	if _is_pathfinding:
+		return
+
+	if _is_event_on_hud(event):
+		return
+
 	# Zoom avec la molette
 	if _camera != null and event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -3199,16 +2086,68 @@ func _input(event: InputEvent) -> void:
 			new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
 			_camera.zoom = Vector2(new_zoom, new_zoom)
 			_clamp_camera_to_map()
-		
+			return
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var new_zoom: float = _camera.zoom.x - ZOOM_STEP
 			new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
 			_camera.zoom = Vector2(new_zoom, new_zoom)
 			_clamp_camera_to_map()
-	
+			return
+
+	# Drag tactile ou souris pour déplacer la caméra
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			_is_dragging = false
+			_drag_start_pos = event.position
+		elif _is_dragging:
+			_is_dragging = false
+			return
+		else:
+			# Tap court → déplacement héros
+			_handle_tap(event.position)
+		return
+
+	if event is InputEventScreenDrag:
+		if not _is_dragging:
+			if _drag_start_pos.distance_to(event.position) > _drag_threshold:
+				_is_dragging = true
+				_camera_follow_hero = false
+		if _is_dragging and _camera:
+			_camera.position -= event.relative * 2.5
+			_clamp_camera_to_map()
+		return
+
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_is_dragging = false
+			_drag_start_pos = event.position
+		elif _is_dragging:
+			_is_dragging = false
+			return
+		else:
+			# Click court → déplacement héros
+			_handle_tap(event.position)
+		return
+
+	if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		if not _is_dragging:
+			if _drag_start_pos.distance_to(event.position) > _drag_threshold:
+				_is_dragging = true
+				_camera_follow_hero = false
+		if _is_dragging and _camera:
+			_camera.position -= event.relative * 2.5
+			_clamp_camera_to_map()
+		return
+
 	# Raccourcis clavier HoMM3
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
+			KEY_H:
+				# Changer de héros (cycle)
+				if _heroes_data.size() > 1:
+					var next_idx: int = (_active_hero_index + 1) % _heroes_data.size()
+					_switch_hero(next_idx)
+					print("🔄 Héros changé: ", _get_active_hero_name())
 			KEY_T:
 				# Fin de tour rapide
 				_end_turn()
@@ -3249,21 +2188,276 @@ func _input(event: InputEvent) -> void:
 						num = 0
 					print("Sélection: ", num)
 
+func _handle_tap(screen_pos: Vector2) -> void:
+	var tile: Vector2i = _screen_to_tile(screen_pos)
+	if tile.x < 0:
+		return
+	var hero_tile: Vector2i = Vector2i(
+		int(_hero.position.x / TILE_SIZE),
+		int(_hero.position.y / TILE_SIZE)
+	)
+	if tile == hero_tile:
+		return
+	
+	# Vérifier si on clique sur un boss
+	for bi in range(_bosses.size()):
+		var boss_tile: Vector2i = Vector2i(
+			int(_bosses[bi].position.x / TILE_SIZE),
+			int(_bosses[bi].position.y / TILE_SIZE)
+		)
+		if tile == boss_tile and _bosses[bi].get("alive", true):
+			var dist: int = absi(hero_tile.x - tile.x) + absi(hero_tile.y - tile.y)
+			if dist <= 1:
+				_start_boss_fight(bi)
+			else:
+				_create_floating_text("Approchez-vous du boss !", Color(0.9, 0.2, 0.2), _hero.position)
+			return
+	
+	# Vérifier si on clique sur un ennemi errant
+	for ei in range(_enemies.size()):
+		var enemy_tile: Vector2i = Vector2i(
+			int(_enemies[ei].position.x / TILE_SIZE),
+			int(_enemies[ei].position.y / TILE_SIZE)
+		)
+		if tile == enemy_tile and _enemies[ei].get("alive", true):
+			var dist: int = absi(hero_tile.x - tile.x) + absi(hero_tile.y - tile.y)
+			if dist <= 1:
+				_start_combat(ei)
+			else:
+				_create_floating_text("Approchez-vous de l'ennemi !", Color(0.9, 0.2, 0.2), _hero.position)
+			return
+
+	# Vérifier si on clique sur un marchand
+	for mi in range(_merchants.size()):
+		var m_tile: Vector2i = Vector2i(
+			int(_merchants[mi].position.x / TILE_SIZE),
+			int(_merchants[mi].position.y / TILE_SIZE)
+		)
+		if tile == m_tile:
+			var dist: int = absi(hero_tile.x - tile.x) + absi(hero_tile.y - tile.y)
+			if dist <= 1:
+				_open_merchant_screen(mi)
+			else:
+				_create_floating_text("Approchez-vous du marchand !", Color(0.9, 0.7, 0.3), _hero.position)
+			return
+
+	if _terrain_move_cost.get(_terrain_grid[tile.x][tile.y], 1) >= 999:
+		if _water_walk_turns > 0:
+			_hero_mp -= 1
+			var target_pos: Vector2 = Vector2(tile.x * TILE_SIZE + TILE_SIZE / 2, tile.y * TILE_SIZE + TILE_SIZE / 2)
+			if _move_tween:
+				_move_tween.kill()
+			_move_tween = create_tween()
+			_move_tween.tween_property(_hero, "position", target_pos, 0.12)
+			if _movement_indicator:
+				_move_tween.parallel().tween_property(_movement_indicator, "position", target_pos, 0.12)
+			_move_tween.tween_callback(_on_path_step_done)
+			_create_floating_text("🌊 Marche sur l'eau !", Color(0.3, 0.7, 1.0), _hero.position)
+			return
+		_create_floating_text("Eau !", Color(0.9, 0.2, 0.2), _hero.position)
+		return
+
+	var path: Array = AStarPathfinding.find_path(
+		_terrain_grid, _terrain_move_cost,
+		hero_tile, tile, _hero_mp
+	)
+	if path.size() <= 1:
+		_create_floating_text("Pas de chemin !", Color(0.9, 0.2, 0.2), _hero.position)
+		return
+
+	var total_cost: int = AStarPathfinding.path_cost(path, _terrain_grid, _terrain_move_cost)
+	if total_cost > _hero_mp:
+		_create_floating_text("MP insuffisants !", Color(0.9, 0.2, 0.2), _hero.position)
+		return
+
+	_path_queue = path
+	_is_pathfinding = true
+	_advance_path_step()
+
+func _is_event_on_hud(event: InputEvent) -> bool:
+	if not (event is InputEventMouseButton or event is InputEventScreenTouch or event is InputEventScreenDrag):
+		return false
+	if _hud == null:
+		return false
+	var pos: Vector2 = event.position
+	for child in _hud.get_children():
+		if _is_control_at_pos(child, pos):
+			return true
+	return false
+
+func _is_control_at_pos(node: Node, pos: Vector2) -> bool:
+	if node is Control and node.visible:
+		var rect := Rect2(node.global_position, node.size)
+		if rect.has_point(pos):
+			return true
+		for c in node.get_children():
+			if _is_control_at_pos(c, pos):
+				return true
+	return false
+
+func _screen_to_tile(screen_pos: Vector2) -> Vector2i:
+	var world_pos: Vector2 = get_canvas_transform().affine_inverse() * screen_pos
+	return Vector2i(
+		clampi(int(world_pos.x / TILE_SIZE), 0, _zone_w - 1),
+		clampi(int(world_pos.y / TILE_SIZE), 0, _zone_h - 1)
+	)
+
+func _is_tap_or_click(event: InputEvent) -> bool:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		return true
+	if event is InputEventScreenTouch and event.pressed:
+		return true
+	return false
+
+func _event_to_tile(event: InputEvent) -> Vector2i:
+	var pos: Vector2
+	if event is InputEventMouseButton:
+		pos = get_global_mouse_position()
+	elif event is InputEventScreenTouch:
+		pos = get_canvas_transform().affine_inverse() * event.position
+	else:
+		return Vector2i(-1, -1)
+	return Vector2i(
+		clampi(int(pos.x / TILE_SIZE), 0, _zone_w - 1),
+		clampi(int(pos.y / TILE_SIZE), 0, _zone_h - 1)
+	)
+
+func _advance_path_step() -> void:
+	if _path_queue.is_empty():
+		_is_pathfinding = false
+		return
+
+	var target_tile: Vector2i = _path_queue.pop_front()
+	var target_pos: Vector2 = Vector2(
+		target_tile.x * TILE_SIZE + TILE_SIZE / 2,
+		target_tile.y * TILE_SIZE + TILE_SIZE / 2
+	)
+
+	var terrain: int = _terrain_grid[target_tile.x][target_tile.y]
+	var step_cost: int = _terrain_move_cost.get(terrain, 1)
+	_hero_mp -= step_cost
+
+	if _move_tween:
+		_move_tween.kill()
+	_move_tween = create_tween()
+
+	# Direction-based lean
+	var knight: Sprite2D = _hero.get_node_or_null("KnightSprite") if _hero else null
+	if knight:
+		var dir: Vector2 = target_pos - _hero.position
+		var lean_angle: float = clampf(dir.x * 0.08, -6.0, 6.0)
+		knight.rotation_degrees = lean_angle
+
+	_move_tween.tween_property(_hero, "position", target_pos, 0.12)
+	if _movement_indicator:
+		_move_tween.parallel().tween_property(_movement_indicator, "position", target_pos, 0.12)
+	_move_tween.tween_callback(_on_path_step_done)
+
+func _on_path_step_done() -> void:
+	_hero_tile = _tile_at_world(_hero.position)
+	_update_fog_of_war()
+	_update_minimap()
+	_clamp_camera_to_map()
+	_update_resource_labels()
+
+	if _path_queue.is_empty():
+		_is_pathfinding = false
+		if _active_hero_index >= 0 and _active_hero_index < _heroes_data.size():
+			_heroes_data[_active_hero_index]["position"] = _hero.position
+		var knight: Sprite2D = _hero.get_node_or_null("KnightSprite") if _hero else null
+		if knight:
+			var rt = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+			rt.tween_property(knight, "rotation_degrees", 0.0, 0.15)
+		_check_city_visit()
+		_check_merchant_visit()
+		_check_resource_collection()
+		_check_treasure_collection()
+	else:
+		_advance_path_step()
+
 func _process(delta: float) -> void:
 	if _game_over_active:
 		return
 	_anim_time += delta
 	_fx_frame += 1
+	if _map_sprite and _map_sprite.material is ShaderMaterial:
+		_map_sprite.material.set_shader_parameter("time", _anim_time * 0.5)
+	if _sky_sprite and _sky_sprite.material is ShaderMaterial:
+		_sky_sprite.material.set_shader_parameter("time", _anim_time)
+	
+	if _hero and _camera_follow_hero and _camera:
+		_camera.position = _hero.position
+	
 	# Halo héros seulement (léger)
 	if _hero != null:
 		var hero_glow: Sprite2D = _hero.get_node_or_null("HeroGlow")
 		if hero_glow != null:
 			var pulse: float = (sin(_anim_time * 3.0) + 1.0) * 0.5
 			hero_glow.modulate.a = 0.6 + pulse * 0.35
+	# Fog dissolve animation (seulement si des tuiles sont en cours d'animation)
+	if not _fog_animating.is_empty():
+		if _fog_overlay and _fog_overlay.material is ShaderMaterial:
+			_fog_overlay.material.set_shader_parameter("time", _anim_time)
+	_process_fog_animation(delta)
+
+	# === AMBIANCE SONORE (vent aléatoire) ===
+	if _ambient_timer <= 0:
+		_ambient_timer = randf_range(8.0, 20.0)
+		if SFX and SFX.has_method("play_wind"):
+			SFX.play_wind()
+	else:
+		_ambient_timer -= delta
+
+	# === EFFETS VISUELS (1 frame sur 2 pour le CPU) ===
+	var t: float = _anim_time
+	if _fx_frame & 1 == 0:
+		for mdata in _light_motes:
+			var m: ColorRect = mdata["node"]
+			if not is_instance_valid(m):
+				continue
+			var m_at := t
+			var m_phase: float = mdata["phase"]
+			m.position.x = mdata["base"].x + sin(m_at * mdata["drift"] + m_phase) * 20.0
+			m.position.y = mdata["base"].y + sin(m_at * mdata["drift"] * 0.7 + m_phase * 1.3) * 15.0
+			m.position.y -= sin(m_at * mdata["speed"] * 0.1) * 5.0
+			m.modulate.a = 0.08 + (sin(m_at + m_phase) * 0.5 + 0.5) * 0.08
+			var ms: float = mdata["size"]
+			m.size = Vector2(ms, ms) * (0.8 + sin(m_at * 0.5 + m_phase) * 0.2)
+
+		for bdata in _japanese_building_data:
+			var sp: Sprite2D = bdata["sprite"]
+			if is_instance_valid(sp):
+				sp.position.y = bdata["base_y"] + sin(t * 1.2 + bdata["node"].position.x * 0.01) * 3.0
+
+		for pdata in _petals:
+			var n: ColorRect = pdata["node"]
+			if not is_instance_valid(n):
+				continue
+			var wind_x := sin(t * 0.3 + pdata["offset"]) * 0.5
+			n.position.y += pdata["speed_y"] + sin(t * 0.7 + pdata["phase"]) * 0.4
+			n.position.x += pdata["speed_x"] + wind_x
+			n.rotation += pdata["rotation_speed"]
+			var wobble := sin(t * 1.2 + pdata["phase"]) * 0.08
+			n.scale = Vector2(1.0 + wobble, 1.0 - wobble * 0.5)
+			var view_h := _world_h * TILE_SIZE
+			var view_w := _world_w * TILE_SIZE
+			if n.position.y > view_h + 20 or n.position.x < -30 or n.position.x > view_w + 30:
+				n.position.y = randf_range(-20, -5)
+				n.position.x = randf_range(0, view_w)
+				n.modulate.a = randf_range(0.3, 0.6)
+				pdata.speed_y = randf_range(12, 28)
+				pdata.speed_x = randf_range(4, 10) * (1 if randf() > 0.5 else -1)
+				pdata.rotation_speed = randf_range(0.3, 0.8) * (1 if randf() > 0.5 else -1)
+				pdata.offset = randf() * TAU
+
+		for lg in _lantern_glows:
+			if is_instance_valid(lg):
+				var gp: float = (sin(t * 2.0) + 1.0) * 0.5
+				lg.modulate.a = 0.12 + gp * 0.10
+
 	# Coffres / fumée : 1 frame sur 4 (cosmétique)
 	if _fx_frame % 4 != 0:
 		return
-	var t: float = _anim_time
 	for chest_node in _treasure_visuals:
 		if not chest_node.visible:
 			continue
@@ -3276,17 +2470,59 @@ func _process(delta: float) -> void:
 		var cycle: float = fmod(t + smoke_data["offset"], smoke_data["speed"]) / smoke_data["speed"]
 		smoke.position.y = smoke_data["base_pos"].y - cycle * 20.0
 		smoke.position.x = smoke_data["base_pos"].x + sin(cycle * TAU) * 3.0
+	for fly in _fireflies:
+		var n: ColorRect = fly["node"]
+		if not is_instance_valid(n):
+			continue
+		var phase: float = t * fly["speed"] + fly["phase"]
+		var dx: float = sin(phase) * fly["radius"]
+		var dy: float = cos(phase * 0.7) * fly["radius"] * 0.5
+		n.position = fly["base"] + Vector2(dx, dy)
+		var blink: float = (sin(t * fly["blink_speed"] + fly["phase"]) + 1.0) * 0.5 * 0.7 + 0.3
+		n.modulate.a = blink
+		var s: float = 1.0 + sin(t * fly["blink_speed"] * 1.5 + fly["phase"]) * 0.3
+		n.scale = Vector2(s, s)
 
 # ============================================================
 # SYSTÈME HOMURA : BROUILLARD DE GUERRE
 # ============================================================
+
+func _process_fog_animation(delta: float) -> void:
+	if _fog_animating.is_empty() or _fog_image == null or _fog_texture == null:
+		return
+	var texture_needs_update: bool = false
+	var finished_keys: Array = []
+	for key in _fog_animating:
+		var anim: Dictionary = _fog_animating[key]
+		var parts: PackedStringArray = key.split(",")
+		var tx: int = int(parts[0])
+		var ty: int = int(parts[1])
+		if tx < 0 or ty < 0 or tx >= _zone_w or ty >= _zone_h:
+			finished_keys.append(key)
+			continue
+		anim["current"] = move_toward(anim["current"], anim["target"], anim["speed"] * delta)
+		_fog_current_alpha[tx][ty] = anim["current"]
+		_paint_fog_tile(tx, ty)
+		texture_needs_update = true
+		if absf(anim["current"] - anim["target"]) < 0.01:
+			_fog_current_alpha[tx][ty] = anim["target"]
+			_paint_fog_tile(tx, ty)
+			finished_keys.append(key)
+	for key in finished_keys:
+		_fog_animating.erase(key)
+	if texture_needs_update and _fx_frame & 1 == 0:
+		_fog_texture.update(_fog_image)
+
 func _init_fog_of_war() -> void:
 	"""Initialise la grille de brouillard de guerre"""
 	_fog_grid = []
+	_fog_current_alpha = []
 	for x in range(_zone_w):
 		_fog_grid.append([])
+		_fog_current_alpha.append([])
 		for y in range(_zone_h):
 			_fog_grid[x].append(0)  # 0 = inconnu
+			_fog_current_alpha[x].append(1.0)  # alpha initial = 1.0 (caché)
 	print("✓ Brouillard de guerre initialisé: ", _zone_w, "x", _zone_h)
 
 func _create_fog_overlay() -> void:
@@ -3302,6 +2538,11 @@ func _create_fog_overlay() -> void:
 	_fog_image.fill(Color(0.04, 0.06, 0.10, 1.0))
 	_fog_texture = ImageTexture.create_from_image(_fog_image)
 	_fog_overlay.texture = _fog_texture
+	var fog_shader := load("res://shaders/fog.gdshader")
+	if fog_shader:
+		var mat := ShaderMaterial.new()
+		mat.shader = fog_shader
+		_fog_overlay.material = mat
 
 func _paint_fog_tile(tx: int, ty: int) -> void:
 	if _fog_image == null or tx < 0 or ty < 0 or tx >= _zone_w or ty >= _zone_h:
@@ -3309,9 +2550,10 @@ func _paint_fog_tile(tx: int, ty: int) -> void:
 	var rect := Rect2i(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
 	var state: int = _fog_grid[tx][ty]
 	if state == 2:
-		_fog_image.fill_rect(rect, Color(0, 0, 0, 0))
+		var alpha: float = _fog_current_alpha[tx][ty] if tx < _fog_current_alpha.size() and ty < _fog_current_alpha[tx].size() else 0.0
+		_fog_image.fill_rect(rect, Color(0.04, 0.06, 0.10, alpha))
 	else:
-		var alpha: float = 1.0 if state == 0 else 0.5
+		var alpha: float = _fog_current_alpha[tx][ty] if tx < _fog_current_alpha.size() and ty < _fog_current_alpha[tx].size() else 1.0
 		_fog_image.fill_rect(rect, Color(0.04, 0.06, 0.10, alpha))
 
 func _refresh_fog_tiles(tiles: Array) -> void:
@@ -3319,6 +2561,25 @@ func _refresh_fog_tiles(tiles: Array) -> void:
 		return
 	for tile in tiles:
 		if tile is Vector2i:
+			var state: int = _fog_grid[tile.x][tile.y]
+			var target_alpha: float
+			if state == 2:
+				target_alpha = 0.0
+			elif state == 1:
+				target_alpha = 0.5
+			else:
+				target_alpha = 1.0
+			var key: String = "%d,%d" % [tile.x, tile.y]
+			if not _fog_animating.has(key):
+				if _fog_current_alpha[tile.x][tile.y] != target_alpha:
+					_fog_animating[key] = {
+						"current": _fog_current_alpha[tile.x][tile.y],
+						"target": target_alpha,
+						"speed": 2.0  # alpha per second
+					}
+			else:
+				_fog_animating[key]["target"] = target_alpha
+			# Paint first frame immediately
 			_paint_fog_tile(tile.x, tile.y)
 	_fog_texture.update(_fog_image)
 
@@ -3402,20 +2663,20 @@ func _update_fog_of_war() -> void:
 # SYSTÈME HOMURA : ARMÉES ENNEMIES
 # ============================================================
 func _init_enemy_armies() -> void:
-	"""Initialise les armées des ennemis avec composition variée"""
+	"""Initialise les armées des ennemis errants uniquement (les boss ont leurs propres armées)"""
 	_enemy_armies = []
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 	rng.randomize()
 	
 	for i in range(_enemies.size()):
 		var army: Array = []
-		var army_size: int = rng.randi_range(1, 3)
-		
+		var army_size: int = rng.randi_range(1, 2)
+
 		for _j in range(army_size):
-			var unit_types: Array = ["pikeman", "archer", "griffin", "swordsman"]
+			var unit_types: Array = ["pikeman", "archer"]
 			var unit_type: String = unit_types[rng.randi_range(0, unit_types.size() - 1)]
 			var unit_data: Dictionary = UNIT_TYPES[unit_type]
-			var count: int = rng.randi_range(3, 15)
+			var count: int = rng.randi_range(2, 5)
 			
 			army.append({
 				"type": unit_type,
@@ -3428,7 +2689,7 @@ func _init_enemy_armies() -> void:
 		
 		_enemy_armies.append(army)
 	
-	print("✓ ", _enemy_armies.size(), " armées ennemies initialisées")
+	print("✓ ", _enemy_armies.size(), " armées errantes initialisées")
 
 # ============================================================
 # SYSTÈME HOMURA : FIN DE TOUR
@@ -3440,6 +2701,15 @@ func _end_turn() -> void:
 	# 1. Restaurer les MP
 	_hero_mp = _hero_max_mp
 	print("🚶 MP restaurés: ", _hero_mp, "/", _hero_max_mp)
+	
+	# 1b. Décompter la marche sur l'eau
+	if _water_walk_turns > 0:
+		_water_walk_turns -= 1
+		if _water_walk_turns <= 0:
+			_create_floating_text("🌊 Amulette aquatique épuisée", Color(0.5, 0.7, 1.0), _hero.position)
+			print("🌊 Marche sur l'eau terminée")
+		else:
+			print("🌊 Marche sur l'eau: ", _water_walk_turns, " tours restants")
 	
 	# 2. Incrémenter le temps
 	_game_day += 1
@@ -3454,22 +2724,57 @@ func _end_turn() -> void:
 			_game_month += 1
 			print("📅 Nouveau mois ! Mois ", _game_month)
 	
-	# 3. Revenus des villes possédées
-	var city_income: int = 0
-	for city_data in _cities_data:
-		if city_data.get("owned", false):
-			city_income += city_data.get("income", 500)
-			# Bonus du silo
-			if "resource_silo" in city_data["buildings"]:
-				_wood += 1
-				_ore += 1
-	
-	if city_income > 0:
-		_gold += city_income
-		print("💰 Revenus des villes: +", city_income, " Or")
-		_create_floating_text("+" + str(city_income) + " 🪙/jour", Color(1.0, 0.85, 0.2), _hero.position)
-	
-	# 4. Mettre à jour l'interface
+	# 3. MOUVEMENT DES ENNEMIS (IA)
+	if _hero != null:
+		var hero_tile: Vector2i = Vector2i(
+			int(_hero.position.x / TILE_SIZE),
+			int(_hero.position.y / TILE_SIZE)
+		)
+		for i in range(_enemies.size()):
+			var ed: Dictionary = _enemies[i]
+			if not ed.get("alive", true):
+				continue
+			var enemy_tile: Vector2i = Vector2i(
+				int(ed.position.x / TILE_SIZE),
+				int(ed.position.y / TILE_SIZE)
+			)
+			var dist: int = absi(hero_tile.x - enemy_tile.x) + absi(hero_tile.y - enemy_tile.y)
+			if dist > ed.get("detection_range", 8):
+				continue
+			var path: Array = AStarPathfinding.find_path(
+				_terrain_grid, _terrain_move_cost,
+				enemy_tile, hero_tile
+			)
+			if path.size() <= 1:
+				continue
+			var enemy_mp: int = ed.get("mp", 8)
+			var steps: int = 0
+			for step_idx in range(1, path.size()):
+				var step_tile: Vector2i = path[step_idx]
+				var step_terrain: int = _terrain_grid[step_tile.x][step_tile.y]
+				var step_cost: int = _terrain_move_cost.get(step_terrain, 1)
+				if step_cost > enemy_mp:
+					break
+				enemy_mp -= step_cost
+				steps = step_idx
+				if step_tile == hero_tile:
+					break
+			if steps > 0:
+				var new_tile: Vector2i = path[steps]
+				var new_pos: Vector2 = Vector2(
+					new_tile.x * TILE_SIZE + TILE_SIZE / 2,
+					new_tile.y * TILE_SIZE + TILE_SIZE / 2
+				)
+				ed.position = new_pos
+				ed.mp = enemy_mp
+				if i < _enemy_visuals.size():
+					var et = create_tween().set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
+					et.tween_property(_enemy_visuals[i], "position", new_pos, 0.25)
+		# Restaurer MP des ennemis pour le prochain tour
+		for ed in _enemies:
+			ed.mp = ed.get("max_mp", 8)
+
+	# 5. Mettre à jour l'interface
 	if _label_date:
 		_label_date.text = "Month %d  Week %d  Day %d" % [_game_month, _game_week, _game_day]
 	_update_resource_labels()
@@ -3499,22 +2804,29 @@ func _check_resource_collection() -> void:
 			# Bonus selon le type + textes flottants
 			match res_type:
 				"gold":
-					_gold += 30
-					print("   🪙 +30 Or !")
-					_create_floating_text("+30 🪙", Color(1.0, 0.85, 0.2), _hero.position)
+					_gold += 50
+					print("   🪙 +50 Or !")
+					_create_floating_text("+50 🪙", Color(1.0, 0.85, 0.2), _hero.position)
 				"wood":
-					_wood += 20
-					print("   🪵 +20 Bois !")
-					_create_floating_text("+20 🪵", Color(0.6, 0.9, 0.4), _hero.position)
+					_wood += 15
+					print("   🪵 +15 Bois !")
+					_create_floating_text("+15 🪵", Color(0.6, 0.9, 0.4), _hero.position)
 				"ore":
-					_ore += 15
-					print("   💎 +15 Minerai !")
-					_create_floating_text("+15 💎", Color(0.75, 0.75, 0.85), _hero.position)
+					_ore += 10
+					print("   💎 +10 Minerai !")
+					_create_floating_text("+10 💎", Color(0.75, 0.75, 0.85), _hero.position)
 			
 			_update_resource_labels()
 			res_data["collected"] = true
+			var burst_color: Color = Color(1.0, 0.85, 0.2) if res_type == "gold" else (Color(0.6, 0.9, 0.4) if res_type == "wood" else Color(0.75, 0.75, 0.85))
+			_spawn_burst_particles(res_pos, burst_color, 8)
 			if i < _resource_visuals.size():
-				_resource_visuals[i].visible = false
+				var res_node: Node2D = _resource_visuals[i]
+				var rt = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+				rt.tween_property(res_node, "scale", Vector2(1.6, 1.6), 0.25)
+				rt.parallel().tween_property(res_node, "modulate:a", 0.0, 0.25)
+				rt.tween_callback(func(): res_node.visible = false)
+			_refresh_minimap()
 			_gain_xp(XP_COLLECT_RESOURCE)
 			break
 
@@ -3531,9 +2843,15 @@ func _check_treasure_collection() -> void:
 		_gold += gold_gain
 		_update_resource_labels()
 		_create_floating_text("+" + str(gold_gain) + " 🪙", Color(1.0, 0.85, 0.2), _hero.position)
+		_spawn_burst_particles(chest_data["position"], Color(1.0, 0.85, 0.2), 10)
 		_gain_xp(xp_gain)
 		if i < _treasure_visuals.size():
-			_treasure_visuals[i].visible = false
+			var chest: Node2D = _treasure_visuals[i]
+			var ct = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+			ct.tween_property(chest, "scale", Vector2(1.8, 1.8), 0.3)
+			ct.parallel().tween_property(chest, "modulate:a", 0.0, 0.3)
+			ct.tween_callback(func(): chest.visible = false)
+		_refresh_minimap()
 		print("📦 Coffre ouvert ! +", gold_gain, " or, +", xp_gain, " XP")
 		break
 
@@ -3544,6 +2862,12 @@ func _update_resource_labels() -> void:
 		_label_wood.text = str(_wood)
 	if _label_ore:
 		_label_ore.text = str(_ore)
+	if "q_rich" not in _quest_completed:
+		if _gold >= 10000:
+			for q in QUESTS:
+				if q["id"] == "q_rich":
+					_complete_quest(q)
+					break
 
 func _get_viewport_size() -> Vector2:
 	return get_viewport().get_visible_rect().size
@@ -3558,22 +2882,29 @@ func _setup_camera_zoom() -> void:
 	_camera.zoom = Vector2(_camera_zoom_default, _camera_zoom_default)
 
 func _clamp_camera_to_map() -> void:
-	if _camera == null:
+	if not _camera:
 		return
-	var zoom: float = _camera.zoom.x
-	var vp: Vector2 = _get_viewport_size()
-	var half_w: float = vp.x / (2.0 * zoom)
-	var half_h: float = vp.y / (2.0 * zoom)
+	var vp := _get_viewport_size()
 	var map_w: float = _zone_w * TILE_SIZE
 	var map_h: float = _zone_h * TILE_SIZE
-	if half_w >= map_w * 0.5:
-		_camera.position.x = map_w * 0.5
-	else:
-		_camera.position.x = clampf(_camera.position.x, half_w, map_w - half_w)
-	if half_h >= map_h * 0.5:
-		_camera.position.y = map_h * 0.5
-	else:
-		_camera.position.y = clampf(_camera.position.y, half_h, map_h - half_h)
+	var zx: float = _camera.zoom.x
+	var zy: float = _camera.zoom.y
+	var half_w: float = vp.x / 2.0 * zx
+	var half_h: float = vp.y / 2.0 * zy
+	var min_x: float = half_w
+	var max_x: float = map_w - half_w
+	var min_y: float = half_h
+	var max_y: float = map_h - half_h
+	if max_x < min_x:
+		var center: float = map_w / 2.0
+		min_x = center
+		max_x = center
+	if max_y < min_y:
+		var center: float = map_h / 2.0
+		min_y = center
+		max_y = center
+	_camera.position.x = clampf(_camera.position.x, min_x, max_x)
+	_camera.position.y = clampf(_camera.position.y, min_y, max_y)
 
 func _check_enemy_encounter() -> void:
 	# Vérifier si le héros est proche d'un ennemi
@@ -3593,7 +2924,11 @@ func _check_enemy_encounter() -> void:
 			break
 
 func _army_to_combat_units(army: Array) -> Array:
-	var units: Array = []
+	# Combat 1v1 : fusionner toute l'armée en 1 unité ennemie
+	var total_hp: int = 0
+	var total_attack: int = 0
+	var total_defense: int = 0
+	var name_parts: Array = []
 	for stack in army:
 		var count: int = stack.get("count", 0)
 		if count <= 0:
@@ -3601,55 +2936,70 @@ func _army_to_combat_units(army: Array) -> Array:
 		var unit_type: String = stack.get("type", "pikeman")
 		var unit_data: Dictionary = UNIT_TYPES.get(unit_type, {})
 		var per_hp: int = unit_data.get("hp", stack.get("hp", 10))
-		var total_hp: int = count * per_hp
-		units.append({
-			"type": unit_type,
-			"name": str(unit_data.get("name", unit_type)) + " x" + str(count),
-			"count": count,
-			"hp": total_hp,
-			"max_hp": total_hp,
-			"attack": unit_data.get("attack", stack.get("attack", 5)),
-			"defense": unit_data.get("defense", stack.get("defense", 5)),
-			"per_hp": per_hp,
-		})
-	return units
+		total_hp += count * per_hp
+		total_attack += unit_data.get("attack", stack.get("attack", 5))
+		total_defense += unit_data.get("defense", stack.get("defense", 5))
+		name_parts.append(unit_data.get("name", unit_type))
+	
+	if army.is_empty():
+		return [{"type": "enemy", "name": "Ennemi", "hp": 30, "max_hp": 30, "attack": 5, "defense": 3, "magic_res": 2}]
+	
+	var avg_attack: int = ceili(float(total_attack) / float(army.size()))
+	var avg_defense: int = ceili(float(total_defense) / float(army.size()))
+	var enemy_name: String = "Armée ennemie"
+	if name_parts.size() > 0:
+		enemy_name = name_parts[0] if name_parts.size() == 1 else "Horde ennemie"
+	
+	return [{
+		"type": "enemy",
+		"name": enemy_name,
+		"hp": total_hp,
+		"max_hp": total_hp,
+		"attack": avg_attack,
+		"defense": avg_defense,
+		"magic_res": 2,
+	}]
 
 func _combat_units_to_army(combat_units: Array) -> Array:
-	var army: Array = []
-	for unit in combat_units:
-		var remaining_hp: int = unit.get("hp", 0)
-		if remaining_hp <= 0:
-			continue
-		var per_hp: int = max(1, unit.get("per_hp", 10))
-		var unit_type: String = unit.get("type", "pikeman")
-		var count: int = ceili(float(remaining_hp) / float(per_hp))
-		army.append({
-			"type": unit_type,
-			"count": count,
-			"hp": per_hp,
-		})
-	return army
+	return []
+
+func _build_hero_combat_units() -> Array:
+	var hero_name: String = _get_active_hero_name()
+	# Combat 1v1 : un seul héros
+	return [{
+		"type": "hero",
+		"name": hero_name,
+		"hp": _hero_hp,
+		"max_hp": _hero_max_hp,
+		"attack": _hero_attack,
+		"defense": _hero_defense,
+		"magic": 10,
+		"magic_res": 4,
+		"is_hero": true,
+	}]
+
+func _on_wanderer_clicked(index: int) -> void:
+	if _in_combat:
+		return
+	_start_combat(index)
 
 func _start_combat(enemy_index: int) -> void:
 	if _in_combat:
 		return
 	
 	_in_combat = true
+	_in_boss_fight = false
 	_current_enemy_index = enemy_index
+	_current_boss_index = -1
 	var enemy_army: Array = _enemy_armies[enemy_index] if enemy_index < _enemy_armies.size() else []
 	var map_enemy: Dictionary = _enemies[enemy_index] if enemy_index < _enemies.size() else {}
-	
-	if _army_to_combat_units(_hero_army).is_empty():
-		_in_combat = false
-		_create_floating_text("Pas de troupes !", Color(0.9, 0.2, 0.2), _hero.position)
-		return
 	
 	print("⚔️ COMBAT ! vs ", map_enemy.get("name", "ennemi"))
 	
 	if _combat_manager:
 		var hero_data: Dictionary = {
-			"units": _army_to_combat_units(_hero_army),
-			"name": "Votre armee",
+			"units": _build_hero_combat_units(),
+			"name": _get_active_hero_name(),
 		}
 		var enemy_data: Dictionary = {
 			"units": _army_to_combat_units(enemy_army),
@@ -3658,6 +3008,62 @@ func _start_combat(enemy_index: int) -> void:
 			"xp": map_enemy.get("xp_reward", 50),
 		}
 		_combat_manager.start_combat(hero_data, enemy_data, enemy_index)
+	else:
+		_in_combat = false
+		print("ERREUR: Combat Manager non initialisé !")
+
+func _start_boss_fight(boss_index: int) -> void:
+	if _in_combat:
+		return
+	
+	_in_combat = true
+	_in_boss_fight = true
+	_current_boss_index = boss_index
+	_current_enemy_index = -1
+	var boss_data: Dictionary = _bosses[boss_index]
+	var boss_army: Array = boss_data.get("army", [])
+	
+	print("⚔️ COMBAT CONTRE LE BOSS ! ", boss_data.get("name", "Boss"))
+	
+	if _combat_manager:
+		var hero_data: Dictionary = {
+			"units": _build_hero_combat_units(),
+			"name": _get_active_hero_name(),
+		}
+		var enemy_units: Array = []
+		var total_hp: int = 0
+		var total_atk: int = 0
+		var total_def: int = 0
+		for stack in boss_army:
+			var unit_type: String = stack.get("type", "swordsman")
+			var unit_data: Dictionary = UNIT_TYPES.get(unit_type, {})
+			var count: int = stack.get("count", 5)
+			var per_hp: int = unit_data.get("hp", 20)
+			total_hp += count * per_hp
+			total_atk += unit_data.get("attack", 12)
+			total_def += unit_data.get("defense", 10)
+		var avg_atk: int = ceili(float(total_atk) / max(1, boss_army.size()))
+		var avg_def: int = ceili(float(total_def) / max(1, boss_army.size()))
+		if boss_army.is_empty():
+			total_hp = boss_data.get("boss_hp", 100)
+			avg_atk = boss_data.get("boss_attack", 15)
+			avg_def = boss_data.get("boss_defense", 10)
+		enemy_units.append({
+			"type": "boss",
+			"name": boss_data.get("name", "Boss"),
+			"hp": total_hp,
+			"max_hp": total_hp,
+			"attack": avg_atk,
+			"defense": avg_def,
+			"magic_res": 8,
+		})
+		var enemy_data: Dictionary = {
+			"units": enemy_units,
+			"name": boss_data.get("name", "Boss"),
+			"gold": boss_data.get("gold_reward", 1500),
+			"xp": boss_data.get("xp_reward", 500),
+		}
+		_combat_manager.start_combat(hero_data, enemy_data, -1)
 	else:
 		_in_combat = false
 		print("ERREUR: Combat Manager non initialisé !")
@@ -3674,58 +3080,123 @@ func _find_alive_unit(army: Array):
 			return unit
 	return null
 
-func _print_army_status(name: String, army: Array) -> void:
-	print("   ", name, " armée:")
+func _print_army_status(army_name: String, army: Array) -> void:
+	print("   ", army_name, " armée:")
 	for unit in army:
 		if unit["count"] > 0:
 			print("      ", unit["count"], " ", UNIT_TYPES[unit["type"]]["name"])
 
 func _on_combat_ended(won: bool) -> void:
 	if _combat_manager:
-		_hero_army = _combat_units_to_army(_combat_manager.get_hero_units())
+		var combat_units: Array = _combat_manager.get_hero_units()
+		if combat_units.size() > 0:
+			var hero_unit: Dictionary = combat_units[0]
+			_hero_hp = hero_unit.get("hp", _hero_hp)
+			_hero_max_hp = hero_unit.get("max_hp", _hero_max_hp)
+			# Sauvegarder dans _heroes_data
+			if _active_hero_index >= 0 and _active_hero_index < _heroes_data.size():
+				_heroes_data[_active_hero_index]["hp"] = _hero_hp
+				_heroes_data[_active_hero_index]["max_hp"] = _hero_max_hp
+		if not won:
+			_hero_hp = 0
 	_in_combat = false
-	if won and _hero_army.is_empty():
+	_in_boss_fight = false
+	if won and _hero_hp <= 0:
 		_trigger_game_over(false, "Victoire sans survivants — campagne terminée.")
 
 func _on_combat_victory(gold_reward: int, xp_reward: int) -> void:
 	print("🎉 VICTOIRE ! +", gold_reward, " Or, +", xp_reward, " XP")
 	
-	if _current_enemy_index < 0 or _current_enemy_index >= _enemies.size():
-		return
+	if _in_boss_fight:
+		# === VICTOIRE SUR UN BOSS ===
+		if _current_boss_index < 0 or _current_boss_index >= _bosses.size():
+			_in_boss_fight = false
+			return
+		
+		var boss_data: Dictionary = _bosses[_current_boss_index]
+		boss_data["alive"] = false
+		
+		_create_floating_text("☠️ BOSS VAINCU!", Color(0.9, 0.1, 0.1), boss_data["position"] - Vector2(0, 30))
+		_create_floating_text("+" + str(gold_reward) + " 🪙", Color(1.0, 0.85, 0.2), _hero.position - Vector2(0, 40))
+		
+		_gold += gold_reward
+		_update_resource_labels()
+		
+		var total_xp: int = xp_reward + XP_KILL_ENEMY
+		_gain_xp(total_xp)
+		
+		# Death animation du boss
+		_spawn_burst_particles(boss_data["position"], Color(0.9, 0.1, 0.1), 20)
+		if _current_boss_index < _boss_visuals.size():
+			var boss_node: Node2D = _boss_visuals[_current_boss_index]
+			var dt = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+			dt.tween_property(boss_node, "scale", Vector2(2.0, 2.0), 0.4)
+			dt.parallel().tween_property(boss_node, "modulate:a", 0.0, 0.4)
+			dt.tween_callback(func(): boss_node.visible = false)
+		_refresh_minimap()
+		
+		# Débloquer un nouveau héros !
+		var hero_unlock: Dictionary = boss_data.get("hero_unlock", {})
+		if not hero_unlock.is_empty():
+			_unlocked_heroes.append(hero_unlock)
+			GameData.unlocked_heroes.append(hero_unlock.get("name", "Heros"))
+			GameData.bosses_defeated += 1
+			var hero_name: String = hero_unlock.get("name", "Inconnu")
+			_create_floating_text("★ " + hero_name + " vous rejoint!", Color(1.0, 0.85, 0.2), _hero.position - Vector2(0, 80))
+			print("★ Nouveau héros débloqué : ", hero_name)
+			_add_unlocked_hero_node(hero_unlock)
+			_update_hud_hero_buttons()
+		
+		_in_boss_fight = false
+		_check_boss_victory()
+	else:
+		# === VICTOIRE SUR UN ENNEMI ERRANT ===
+		if _current_enemy_index < 0 or _current_enemy_index >= _enemies.size():
+			return
+		
+		var enemy_data: Dictionary = _enemies[_current_enemy_index]
+		enemy_data["alive"] = false
+		
+		_create_floating_text("☠️ VAINCU!", Color(0.9, 0.1, 0.1), enemy_data["position"] - Vector2(0, 30))
+		_create_floating_text("+" + str(gold_reward) + " 🪙", Color(1.0, 0.85, 0.2), _hero.position - Vector2(0, 40))
+		
+		_gold += gold_reward
+		_update_resource_labels()
+		
+		var total_xp: int = xp_reward + XP_KILL_ENEMY
+		_gain_xp(total_xp)
+		
+		_spawn_burst_particles(enemy_data["position"], Color(0.8, 0.1, 0.1), 12)
+		if _current_enemy_index < _enemy_visuals.size():
+			var enemy_node: Node2D = _enemy_visuals[_current_enemy_index]
+			var dt = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+			dt.tween_property(enemy_node, "scale", Vector2(1.5, 1.5), 0.3)
+			dt.parallel().tween_property(enemy_node, "modulate:a", 0.0, 0.3)
+			dt.tween_callback(func(): enemy_node.visible = false)
+		_refresh_minimap()
+		_check_quest("q_warrior")
 	
-	var enemy_data: Dictionary = _enemies[_current_enemy_index]
-	enemy_data["alive"] = false
-	
-	_create_floating_text("☠️ VAINCU!", Color(0.9, 0.1, 0.1), enemy_data["position"] - Vector2(0, 30))
-	_create_floating_text("+" + str(gold_reward) + " 🪙", Color(1.0, 0.85, 0.2), _hero.position - Vector2(0, 40))
-	
-	_gold += gold_reward
-	_update_resource_labels()
-	
-	var total_xp: int = xp_reward + XP_KILL_ENEMY
-	_gain_xp(total_xp)
-	
-	if _current_enemy_index < _enemy_visuals.size():
-		_enemy_visuals[_current_enemy_index].visible = false
-	
-	_check_campaign_victory()
+	# Mettre à jour l'XP générale après chaque combat
+	_update_hero_panel()
+
+func _check_boss_victory() -> void:
+	for boss_data in _bosses:
+		if boss_data.get("alive", true):
+			return
+	_trigger_game_over(true, "Vous avez vaincu tous les boss !\nLa région est libérée !\n\n★ Tous les héros sont débloqués ★")
 
 func _on_combat_defeat() -> void:
 	print("💀 DÉFAITE !")
 	_hero_army = []
 	_hero_hp = 0
+	_in_boss_fight = false
 	_update_hero_panel()
 	_trigger_game_over(false, "Votre armée a été vaincue.\nLa campagne est terminée.")
 
 func _on_combat_fled() -> void:
 	print("🏃 Fuite reussie !")
 	_in_combat = false
-
-func _check_campaign_victory() -> void:
-	for enemy_data in _enemies:
-		if enemy_data.get("alive", true):
-			return
-	_trigger_game_over(true, "Vous avez conquis la région !")
+	_in_boss_fight = false
 
 func _on_surrender_pressed() -> void:
 	_trigger_game_over(false, "Vous avez abandonné la campagne.")
@@ -3752,127 +3223,217 @@ func _show_game_overlay(victory: bool, message: String) -> void:
 	else:
 		for child in _game_over_layer.get_children():
 			child.queue_free()
-	
+
 	var root := Control.new()
 	root.name = "GameOverRoot"
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.anchor_right = 1.0
-	root.anchor_bottom = 1.0
-	root.offset_left = 0.0
-	root.offset_top = 0.0
-	root.offset_right = 0.0
-	root.offset_bottom = 0.0
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
 	_game_over_layer.add_child(root)
 	_game_overlay = root
-	
+
 	var dim := ColorRect.new()
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.anchor_right = 1.0
-	dim.anchor_bottom = 1.0
-	dim.offset_left = 0.0
-	dim.offset_top = 0.0
-	dim.offset_right = 0.0
-	dim.offset_bottom = 0.0
-	dim.color = Color(0.02, 0.03, 0.08, 0.92)
+	dim.color = Color(0.02, 0.03, 0.06, 0.90)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(dim)
-	
+
 	var panel := Panel.new()
-	panel.custom_minimum_size = Vector2(520, 260)
+	panel.custom_minimum_size = Vector2(560, 320)
 	panel.set_anchors_preset(Control.PRESET_CENTER)
 	panel.anchor_left = 0.5
 	panel.anchor_top = 0.5
 	panel.anchor_right = 0.5
 	panel.anchor_bottom = 0.5
-	panel.offset_left = -260.0
-	panel.offset_top = -130.0
-	panel.offset_right = 260.0
-	panel.offset_bottom = 130.0
+	panel.offset_left = -280.0
+	panel.offset_top = -160.0
+	panel.offset_right = 280.0
+	panel.offset_bottom = 160.0
+	panel.modulate.a = 0.0
+	panel.scale = Vector2(0.8, 0.8)
 	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.08, 0.06, 0.05, 0.95)
-	panel_style.border_color = Color(0.85, 0.25, 0.25)
+	panel_style.bg_color = Color(0.06, 0.05, 0.04, 0.95)
+	if victory:
+		panel_style.border_color = Color(0.85, 0.72, 0.18)
+	else:
+		panel_style.border_color = Color(0.70, 0.12, 0.12)
 	panel_style.border_width_left = 3
 	panel_style.border_width_right = 3
 	panel_style.border_width_top = 3
 	panel_style.border_width_bottom = 3
-	panel_style.corner_radius_top_left = 10
-	panel_style.corner_radius_top_right = 10
-	panel_style.corner_radius_bottom_left = 10
-	panel_style.corner_radius_bottom_right = 10
+	panel_style.corner_radius_top_left = 16
+	panel_style.corner_radius_top_right = 16
+	panel_style.corner_radius_bottom_left = 16
+	panel_style.corner_radius_bottom_right = 16
+	panel_style.shadow_color = Color(0, 0, 0, 0.60)
+	panel_style.shadow_size = 30
+	panel_style.shadow_offset = Vector2(0, 10)
 	panel.add_theme_stylebox_override("panel", panel_style)
 	root.add_child(panel)
-	
+
+	# Decorative top bar
+	var deco_top := ColorRect.new()
+	deco_top.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	deco_top.size = Vector2(560, 70)
+	deco_top.position = Vector2(-280, 0)
+	if victory:
+		deco_top.color = Color(0.15, 0.10, 0.02, 0.90)
+	else:
+		deco_top.color = Color(0.18, 0.04, 0.03, 0.90)
+	deco_top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(deco_top)
+
+	# Accent line
+	var accent_line := ColorRect.new()
+	accent_line.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	accent_line.size = Vector2(560, 3)
+	accent_line.position = Vector2(-280, 67)
+	if victory:
+		accent_line.color = Color(0.85, 0.72, 0.18)
+	else:
+		accent_line.color = Color(0.70, 0.12, 0.12)
+	panel.add_child(accent_line)
+
 	var box := VBoxContainer.new()
 	box.set_anchors_preset(Control.PRESET_FULL_RECT)
-	box.anchor_right = 1.0
-	box.anchor_bottom = 1.0
-	box.offset_left = 24.0
+	box.offset_left = 28.0
 	box.offset_top = 20.0
-	box.offset_right = -24.0
-	box.offset_bottom = -20.0
+	box.offset_right = -28.0
+	box.offset_bottom = -24.0
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 18)
+	box.add_theme_constant_override("separation", 16)
 	panel.add_child(box)
-	
+
+	# Title with larger size
 	var title := Label.new()
-	title.text = "VICTOIRE !" if victory else "GAME OVER"
+	title.text = "VICTOIRE !" if victory else "DÉFAITE..."
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 40)
-	title.add_theme_color_override("font_color", Color(0.95, 0.85, 0.2) if victory else Color(0.92, 0.28, 0.22))
+	title.add_theme_font_size_override("font_size", 44)
+	if victory:
+		title.add_theme_color_override("font_color", Color(0.95, 0.85, 0.20))
+	else:
+		title.add_theme_color_override("font_color", Color(0.92, 0.28, 0.22))
+	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.60))
 	box.add_child(title)
-	
+
+	# Description
 	var desc := Label.new()
 	desc.text = message
 	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc.custom_minimum_size = Vector2(440, 0)
+	desc.custom_minimum_size = Vector2(480, 0)
 	desc.add_theme_font_size_override("font_size", 16)
-	desc.add_theme_color_override("font_color", Color(0.9, 0.85, 0.75))
+	desc.add_theme_color_override("font_color", Color(0.90, 0.86, 0.78))
 	box.add_child(desc)
-	
+
+	# Spacer
+	var spacer := ColorRect.new()
+	spacer.custom_minimum_size = Vector2(0, 8)
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(spacer)
+
+	# Button with improved style
 	var btn := Button.new()
 	btn.text = "Retour au menu"
-	btn.custom_minimum_size = Vector2(260, 48)
+	btn.custom_minimum_size = Vector2(260, 50)
 	btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn.add_theme_font_size_override("font_size", 18)
+	btn.add_theme_color_override("font_color", Color(0.95, 0.92, 0.85))
+	var btn_style := StyleBoxFlat.new()
+	btn_style.bg_color = Color(0.18, 0.14, 0.10)
+	if victory:
+		btn_style.border_color = Color(0.85, 0.72, 0.18)
+	else:
+		btn_style.border_color = Color(0.70, 0.20, 0.18)
+	btn_style.border_width_left = 1
+	btn_style.border_width_right = 1
+	btn_style.border_width_top = 1
+	btn_style.border_width_bottom = 3
+	btn_style.corner_radius_top_left = 14
+	btn_style.corner_radius_top_right = 14
+	btn_style.corner_radius_bottom_left = 14
+	btn_style.corner_radius_bottom_right = 14
+	btn_style.shadow_color = Color(0, 0, 0, 0.50)
+	btn_style.shadow_size = 8
+	btn_style.shadow_offset = Vector2(0, 3)
+	btn.add_theme_stylebox_override("normal", btn_style)
+	var btn_hover := StyleBoxFlat.new()
+	btn_hover.bg_color = Color(0.26, 0.20, 0.14)
+	if victory:
+		btn_hover.border_color = Color(0.95, 0.82, 0.28)
+	else:
+		btn_hover.border_color = Color(0.85, 0.30, 0.25)
+	btn_hover.border_width_left = 1
+	btn_hover.border_width_right = 1
+	btn_hover.border_width_top = 1
+	btn_hover.border_width_bottom = 3
+	btn_hover.corner_radius_top_left = 14
+	btn_hover.corner_radius_top_right = 14
+	btn_hover.corner_radius_bottom_left = 14
+	btn_hover.corner_radius_bottom_right = 14
+	btn_hover.shadow_color = Color(0, 0, 0, 0.60)
+	btn_hover.shadow_size = 10
+	btn_hover.shadow_offset = Vector2(0, 4)
+	btn.add_theme_stylebox_override("hover", btn_hover)
 	btn.pressed.connect(func():
 		get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 	)
 	box.add_child(btn)
 
-func _victory_combat(enemy_index: int, enemy_data: Dictionary) -> void:
+	# Entrance animation
+	var pt = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	pt.tween_property(panel, "modulate:a", 1.0, 0.5)
+	pt.parallel().tween_property(panel, "scale", Vector2(1.0, 1.0), 0.5)
+
+func _victory_combat(_enemy_index: int, _enemy_data: Dictionary) -> void:
 	# OBSOLETE - remplacé par _on_combat_victory
 	pass
 
-func _combat_round(enemy_index: int) -> void:
+func _combat_round(_enemy_index: int) -> void:
 	# OBSOLETE - remplacé par le CombatManager
 	pass
 
 func _check_city_visit() -> void:
+	var city_keys: Array = MAJOR_CITIES.keys()
 	for i in range(_cities.size()):
 		var city_pos: Vector2 = _cities[i]
 		var distance: float = _hero.position.distance_to(city_pos)
 		if distance < TILE_SIZE:
 			if i != _last_city_visit_index:
 				_last_city_visit_index = i
-				print("🏛️ Bienvenue à la Ville ", i + 1, " !")
-				_open_town_screen(i)
+				var city_name: String = _cities_data[i].get("name", "Ville " + str(i + 1))
+
+				if not _visited_cities.get(i, false):
+					print("🏛️ Visite de ", city_name, " !")
+					_add_units_to_army("pikeman", 5)
+					_add_units_to_army("archer", 3)
+					_create_floating_text("Renforts ! +5 Piquiers +3 Archers", Color(0.5, 0.9, 0.5), _hero.position)
+					
+					# Révéler le brouillard autour de la ville
+					var city_tile: Vector2i = _cities_data[i].get("tile", Vector2i(
+						int(city_pos.x / TILE_SIZE),
+						int(city_pos.y / TILE_SIZE)
+					))
+					_reveal_fog_around_pos(city_tile, 5)
+
+			_open_town_screen(i)
 			return
 	_last_city_visit_index = -1
 
 func _open_town_screen(city_index: int) -> void:
-	if _town_screen_open or _town_overlay == null:
+	if _town_screen_open or _town_overlay == null or _merchant_screen_open:
 		return
 	_town_screen_open = true
 	_selected_city_index = city_index
+	var city_name: String = _cities_data[city_index].get("name", "Ville " + str(city_index + 1))
 	if _town_title_label:
-		_town_title_label.text = "Ville " + str(city_index + 1)
+		_town_title_label.text = city_name
 	_town_overlay.visible = true
+	_refresh_town_ui()
 	if not _visited_cities.get(city_index, false):
 		_visited_cities[city_index] = true
 		_gain_xp(XP_VISIT_CITY)
-		_create_floating_text("Ville decouverte!", Color(0.7, 0.85, 1.0), _hero.position)
+		_create_floating_text(city_name + " decouverte!", Color(0.7, 0.85, 1.0), _hero.position)
+		_check_quest("q_explorer")
 
 func _close_town_screen() -> void:
 	_town_screen_open = false
@@ -3914,10 +3475,11 @@ func _build_city_building(city_index: int, building_key: String) -> void:
 	
 	# Effets spéciaux
 	if building_key == "town_hall":
-		city_data["income"] += 500
+		city_data["income"] += 750
 	
 	print("✅ ", b_data["name"], " construit !")
 	_create_floating_text("+" + b_data["name"], Color(0.5, 0.9, 0.5), _cities[city_index])
+	_check_quest("q_builder")
 	
 	# Mettre à jour l'UI
 	if _label_gold:
@@ -3926,6 +3488,8 @@ func _build_city_building(city_index: int, building_key: String) -> void:
 		_label_wood.text = str(_wood)
 	if _label_ore:
 		_label_ore.text = str(_ore)
+	if _town_screen_open:
+		_refresh_town_ui()
 
 func _recruit_unit(city_index: int, unit_type: String, count: int) -> void:
 	"""Recrute des unités dans une ville"""
@@ -3973,6 +3537,7 @@ func _recruit_unit(city_index: int, unit_type: String, count: int) -> void:
 	
 	print("✅ ", count, " ", unit_data["name"], " recrutés !")
 	_create_floating_text("+" + str(count) + " " + unit_data["name"], Color(0.5, 0.7, 1.0), _hero.position)
+	_check_quest("q_army", count)
 	
 	# Mettre à jour l'UI
 	if _label_gold:
@@ -3981,60 +3546,405 @@ func _recruit_unit(city_index: int, unit_type: String, count: int) -> void:
 		_label_wood.text = str(_wood)
 	if _label_ore:
 		_label_ore.text = str(_ore)
+	if _town_screen_open:
+		_refresh_town_ui()
 
 func _create_town_overlay() -> void:
 	_town_overlay = Panel.new()
 	_town_overlay.name = "TownOverlay"
 	_town_overlay.visible = false
 	_town_overlay.set_anchors_preset(Control.PRESET_CENTER)
-	_town_overlay.custom_minimum_size = Vector2(340, 320)
-	_town_overlay.position = Vector2(470, 200)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.10, 0.08, 0.06)
-	style.border_color = Color(0.85, 0.25, 0.25)
-	style.border_width_left = 3
-	style.border_width_right = 3
-	style.border_width_top = 3
-	style.border_width_bottom = 3
-	style.corner_radius_top_left = 8
-	style.corner_radius_top_right = 8
-	style.corner_radius_bottom_left = 8
-	style.corner_radius_bottom_right = 8
-	_town_overlay.add_theme_stylebox_override("panel", style)
+	_town_overlay.custom_minimum_size = Vector2(mini(580, int(_get_viewport_size().x * 0.9)), mini(800, int(_get_viewport_size().y * 0.85)))
+	var jap_theme := JapaneseUITheme.new()
+	_town_overlay.add_theme_stylebox_override("panel", JapaneseUITheme.panel_style(12))
 	add_child(_town_overlay)
-	
-	var vbox := VBoxContainer.new()
-	vbox.position = Vector2(16, 12)
-	vbox.custom_minimum_size = Vector2(308, 296)
-	vbox.add_theme_constant_override("separation", 8)
-	_town_overlay.add_child(vbox)
-	
+
+	var margin := 12
+	var main_vbox := VBoxContainer.new()
+	main_vbox.position = Vector2(margin, margin)
+	main_vbox.custom_minimum_size = _town_overlay.custom_minimum_size - Vector2(margin * 2, margin * 2)
+	main_vbox.add_theme_constant_override("separation", 6)
+	_town_overlay.add_child(main_vbox)
+
 	_town_title_label = Label.new()
 	_town_title_label.text = "Ville"
 	_town_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_town_title_label.add_theme_font_size_override("font_size", 20)
+	_town_title_label.add_theme_font_size_override("font_size", 22)
 	_town_title_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.2))
-	vbox.add_child(_town_title_label)
-	
-	var btn_pikeman := Button.new()
-	btn_pikeman.text = "Recruter 5 Piquiers (300 or)"
-	btn_pikeman.pressed.connect(func(): _on_town_recruit("pikeman", 5))
-	vbox.add_child(btn_pikeman)
-	
-	var btn_archer := Button.new()
-	btn_archer.text = "Recruter 3 Archers (300 or)"
-	btn_archer.pressed.connect(func(): _on_town_recruit("archer", 3))
-	vbox.add_child(btn_archer)
-	
-	var btn_barracks := Button.new()
-	btn_barracks.text = "Construire Caserne"
-	btn_barracks.pressed.connect(func(): _on_town_build("barracks"))
-	vbox.add_child(btn_barracks)
-	
+	main_vbox.add_child(_town_title_label)
+
+	var res_label := Label.new()
+	res_label.name = "TownResLabel"
+	res_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	res_label.add_theme_font_size_override("font_size", 14)
+	res_label.add_theme_color_override("font_color", Color(0.8, 0.75, 0.65))
+	main_vbox.add_child(res_label)
+	_town_res_label = res_label
+
+	var tab_container := TabContainer.new()
+	tab_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tab_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tab_container.add_theme_color_override("font_color", Color(0.9, 0.85, 0.75))
+	main_vbox.add_child(tab_container)
+
+	var recruit_tab := VBoxContainer.new()
+	recruit_tab.name = "Recrutement"
+	recruit_tab.add_theme_constant_override("separation", 4)
+	tab_container.add_child(recruit_tab)
+	_town_recruit_container = recruit_tab
+
+	var build_tab := VBoxContainer.new()
+	build_tab.name = "Construction"
+	build_tab.add_theme_constant_override("separation", 4)
+	tab_container.add_child(build_tab)
+	_town_build_container = build_tab
+
+	var garrison_tab := VBoxContainer.new()
+	garrison_tab.name = "Garnison"
+	garrison_tab.add_theme_constant_override("separation", 4)
+	tab_container.add_child(garrison_tab)
+	_town_garrison_label = Label.new()
+	_town_garrison_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	_town_garrison_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	garrison_tab.add_child(_town_garrison_label)
+
 	var btn_close := Button.new()
-	btn_close.text = "Quitter"
+	btn_close.text = "Fermer"
+	btn_close.custom_minimum_size = Vector2(0, 36)
 	btn_close.pressed.connect(_close_town_screen)
-	vbox.add_child(btn_close)
+	JapaneseUITheme.style_button(btn_close)
+	JapaneseUITheme.add_hover_scale(btn_close)
+	main_vbox.add_child(btn_close)
+
+func _refresh_town_ui() -> void:
+	if _selected_city_index < 0 or _selected_city_index >= _cities_data.size():
+		return
+	var city_data: Dictionary = _cities_data[_selected_city_index]
+	if _town_res_label:
+		_town_res_label.text = "Or: %d  Bois: %d  Minerai: %d" % [_gold, _wood, _ore]
+
+	# Vidanger et remplir les onglets
+	if not _town_recruit_container:
+		return
+
+	# Recrutement
+	for c in _town_recruit_container.get_children():
+		c.queue_free()
+	for u_key in UNIT_TYPES:
+		var u_data: Dictionary = UNIT_TYPES[u_key]
+		var req_building: String = ""
+		match u_key:
+			"pikeman": req_building = "barracks"
+			"archer": req_building = "archery_range"
+			"griffin": req_building = "griffin_tower"
+			"swordsman": req_building = "training_ground"
+			"cavalier": req_building = "stables"
+			"angel": req_building = "angel_statue"
+		if req_building != "" and not req_building in city_data["buildings"]:
+			continue
+		var btn := Button.new()
+		btn.text = "%s - %d or (x5)" % [u_data["name"], u_data["cost_g"] * 5]
+		btn.pressed.connect(func(ut=u_key): _on_town_recruit(ut, 5))
+		btn.disabled = _gold < u_data["cost_g"] * 5
+		_town_recruit_container.add_child(btn)
+
+	# Construction
+	for c in _town_build_container.get_children():
+		c.queue_free()
+	for b_key in CITY_BUILDINGS:
+		var b_data: Dictionary = CITY_BUILDINGS[b_key]
+		var owned: bool = b_key in city_data["buildings"]
+		var btn := Button.new()
+		if owned:
+			btn.text = "✅ %s (construit)" % b_data["name"]
+			btn.disabled = true
+		else:
+			btn.text = "%s - %d or, %d bois, %d minerai" % [b_data["name"], b_data["cost_g"], b_data["cost_w"], b_data["cost_o"]]
+			btn.pressed.connect(func(bk=b_key): _on_town_build(bk))
+			btn.disabled = _gold < b_data["cost_g"] or _wood < b_data["cost_w"] or _ore < b_data["cost_o"]
+		_town_build_container.add_child(btn)
+
+	# Garnison
+	if _town_garrison_label:
+		var gtext: String = ""
+		for unit in _hero_army:
+			if gtext != "":
+				gtext += "\n"
+			gtext += "%s x%d" % [UNIT_TYPES.get(unit["type"], {}).get("name", unit["type"]), unit.get("count", 0)]
+		if gtext == "":
+			gtext = "Aucune troupe"
+		_town_garrison_label.text = gtext
+
+# ============================================================
+# SYSTÈME MARCHANDS
+# ============================================================
+
+func _create_merchant_overlay() -> void:
+	var merchant_layer := CanvasLayer.new()
+	merchant_layer.name = "MerchantCanvasLayer"
+	add_child(merchant_layer)
+
+	_merchant_overlay = Panel.new()
+	_merchant_overlay.name = "MerchantOverlay"
+	_merchant_overlay.visible = false
+	var overlay_size := Vector2(mini(520, int(_get_viewport_size().x * 0.88)), mini(640, int(_get_viewport_size().y * 0.78)))
+	var vp_size := _get_viewport_size()
+	_merchant_overlay.position = Vector2((vp_size.x - overlay_size.x) / 2, 190)
+	_merchant_overlay.size = overlay_size
+	_merchant_overlay.custom_minimum_size = overlay_size
+	var jap_theme := JapaneseUITheme.new()
+	_merchant_overlay.add_theme_stylebox_override("panel", JapaneseUITheme.panel_style(12))
+	merchant_layer.add_child(_merchant_overlay)
+
+	var margin := 12
+	var main_vbox := VBoxContainer.new()
+	main_vbox.position = Vector2(margin, margin)
+	main_vbox.size = overlay_size - Vector2(margin * 2, margin * 2)
+	main_vbox.add_theme_constant_override("separation", 8)
+	_merchant_overlay.add_child(main_vbox)
+
+	var top_hbox := HBoxContainer.new()
+	main_vbox.add_child(top_hbox)
+
+	_merchant_title_label = Label.new()
+	_merchant_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_merchant_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_merchant_title_label.add_theme_font_size_override("font_size", 22)
+	_merchant_title_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.2))
+	top_hbox.add_child(_merchant_title_label)
+
+	var btn_x := Button.new()
+	btn_x.text = "✕"
+	btn_x.custom_minimum_size = Vector2(32, 32)
+	btn_x.pressed.connect(_close_merchant_screen)
+	btn_x.add_theme_font_size_override("font_size", 18)
+	btn_x.add_theme_color_override("font_color", Color(0.9, 0.3, 0.2))
+	var x_style := StyleBoxFlat.new()
+	x_style.bg_color = Color(0.3, 0.1, 0.1, 0.6)
+	x_style.border_width_left = 1
+	x_style.border_width_right = 1
+	x_style.border_width_top = 1
+	x_style.border_width_bottom = 1
+	x_style.border_color = Color(0.6, 0.2, 0.15)
+	x_style.corner_radius_top_left = 4
+	x_style.corner_radius_top_right = 4
+	x_style.corner_radius_bottom_left = 4
+	x_style.corner_radius_bottom_right = 4
+	btn_x.add_theme_stylebox_override("normal", x_style)
+	top_hbox.add_child(btn_x)
+
+	var gold_label := Label.new()
+	gold_label.name = "MerchantGoldLabel"
+	gold_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	gold_label.add_theme_font_size_override("font_size", 14)
+	gold_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	main_vbox.add_child(gold_label)
+
+	_merchant_items_container = VBoxContainer.new()
+	_merchant_items_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_merchant_items_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_merchant_items_container.add_theme_constant_override("separation", 6)
+	main_vbox.add_child(_merchant_items_container)
+
+	var btn_close := Button.new()
+	btn_close.text = "Quitter la boutique"
+	btn_close.custom_minimum_size = Vector2(0, 36)
+	btn_close.pressed.connect(_close_merchant_screen)
+	JapaneseUITheme.style_button(btn_close)
+	JapaneseUITheme.add_hover_scale(btn_close)
+	main_vbox.add_child(btn_close)
+
+func _open_merchant_screen(index: int) -> void:
+	if _merchant_screen_open or _merchant_overlay == null or _town_screen_open:
+		return
+	_merchant_screen_open = true
+	_selected_merchant_index = index
+	var merchant_data: Dictionary = _merchants[index]
+	if _merchant_title_label:
+		_merchant_title_label.text = "🏪 " + merchant_data.get("name", "Marchand")
+	_merchant_overlay.visible = true
+	_refresh_merchant_ui()
+	print("🏪 Marchand ouvert : ", merchant_data.get("name", "?"))
+
+func _close_merchant_screen() -> void:
+	_merchant_screen_open = false
+	_selected_merchant_index = -1
+	_last_merchant_visit_index = -1
+	if _merchant_overlay:
+		_merchant_overlay.visible = false
+
+func _refresh_merchant_ui() -> void:
+	if _merchant_items_container == null or _selected_merchant_index < 0:
+		return
+
+	for c in _merchant_items_container.get_children():
+		c.queue_free()
+
+	var gold_lbl: Label = _merchant_overlay.get_node_or_null("MerchantGoldLabel")
+	if gold_lbl:
+		gold_lbl.text = "🪙 Or: %d" % _gold
+
+	for item_key in MERCHANT_ITEMS:
+		var item: Dictionary = MERCHANT_ITEMS[item_key]
+		var already_owned: bool = false
+		for owned in _player_items:
+			if owned.get("item_id") == item_key:
+				already_owned = true
+				break
+
+		var cost_str: String = ""
+		if item.get("cost_w", 0) > 0:
+			cost_str += str(item.cost_w) + "🪵 "
+		if item.get("cost_o", 0) > 0:
+			cost_str += str(item.cost_o) + "💎 "
+		cost_str += str(item.cost) + "🪙"
+
+		var btn := Button.new()
+		if already_owned:
+			btn.text = "%s %s — %s [ACHETÉ]" % [item.icon, item.name, item.desc]
+			btn.disabled = true
+		else:
+			btn.text = "%s %s — %s (%s)" % [item.icon, item.name, item.desc, cost_str]
+			btn.disabled = _gold < item.cost or _wood < item.get("cost_w", 0) or _ore < item.get("cost_o", 0)
+			btn.pressed.connect(_on_merchant_item_pressed.bind(item_key))
+
+		var s := StyleBoxFlat.new()
+		s.bg_color = Color(0.12, 0.10, 0.06)
+		s.border_color = Color(0.45, 0.38, 0.22)
+		s.border_width_left = 1
+		s.border_width_right = 1
+		s.border_width_top = 1
+		s.border_width_bottom = 2
+		s.corner_radius_top_left = 4
+		s.corner_radius_top_right = 4
+		s.corner_radius_bottom_left = 4
+		s.corner_radius_bottom_right = 4
+		btn.add_theme_stylebox_override("normal", s)
+		btn.add_theme_font_size_override("font_size", 13)
+		btn.add_theme_color_override("font_color", Color(0.9, 0.85, 0.8))
+		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		btn.custom_minimum_size = Vector2(0, 42)
+		_merchant_items_container.add_child(btn)
+
+func _on_merchant_item_pressed(item_key: String) -> void:
+	_buy_merchant_item(item_key)
+
+func _buy_merchant_item(item_key: String) -> void:
+	if _selected_merchant_index < 0:
+		return
+	var item: Dictionary = MERCHANT_ITEMS.get(item_key, {})
+	var cost_w: int = item.get("cost_w", 0)
+	var cost_o: int = item.get("cost_o", 0)
+	if item.is_empty() or _gold < item.cost or _wood < cost_w or _ore < cost_o:
+		return
+
+	_gold -= item.cost
+	_wood -= cost_w
+	_ore -= cost_o
+	_update_resource_labels()
+
+	_player_items.append({"item_id": item_key, "effect": item.effect, "value": item.value})
+
+	var msg: String = ""
+	match item.effect:
+		"attack":
+			_hero_attack += item.value
+			msg = "ATK +%d !" % item.value
+			if _active_hero_index >= 0 and _active_hero_index < _heroes_data.size():
+				_heroes_data[_active_hero_index]["attack"] = _hero_attack
+		"defense":
+			_hero_defense += item.value
+			msg = "DEF +%d !" % item.value
+			if _active_hero_index >= 0 and _active_hero_index < _heroes_data.size():
+				_heroes_data[_active_hero_index]["defense"] = _hero_defense
+		"spell_fire":
+			msg = "🔥 Sort de feu acquis !"
+		"spell_heal":
+			_hero_hp = mini(_hero_hp + item.value, _hero_max_hp)
+			msg = "Soin +%d PV !" % item.value
+			if _active_hero_index >= 0 and _active_hero_index < _heroes_data.size():
+				_heroes_data[_active_hero_index]["hp"] = _hero_hp
+		"compass":
+			msg = "🧭 Boussole activée !"
+			_close_merchant_screen()
+			_reveal_nearest_boss()
+		"water_walk":
+			_water_walk_turns = item.value
+			msg = "🌊 Marche sur l'eau (%d tours) !" % item.value
+
+	_create_floating_text(msg, Color(0.5, 0.9, 0.5), _hero.position)
+	print("✅ Achat: ", item.name, " — ", msg)
+	_refresh_merchant_ui()
+
+func _reveal_nearest_boss() -> void:
+	var hero_tile: Vector2i = Vector2i(int(_hero.position.x / TILE_SIZE), int(_hero.position.y / TILE_SIZE))
+	var nearest_dist: int = 9999
+	var nearest_pos: Vector2 = Vector2.ZERO
+	var nearest_name: String = ""
+	for boss_data in _bosses:
+		if not boss_data.get("alive", true):
+			continue
+		var b_tile: Vector2i = Vector2i(int(boss_data.position.x / TILE_SIZE), int(boss_data.position.y / TILE_SIZE))
+		# Ignorer les boss déjà découverts (brouillard levé sur leur case)
+		if b_tile.x >= 0 and b_tile.y >= 0 and b_tile.x < _zone_w and b_tile.y < _zone_h:
+			if _fog_grid[b_tile.x][b_tile.y] >= 1:
+				continue
+		var d: int = absi(hero_tile.x - b_tile.x) + absi(hero_tile.y - b_tile.y)
+		if d < nearest_dist:
+			nearest_dist = d
+			nearest_pos = boss_data.position
+			nearest_name = boss_data.get("name", "Boss")
+	if nearest_dist < 9999:
+		var boss_tile: Vector2i = Vector2i(int(nearest_pos.x / TILE_SIZE), int(nearest_pos.y / TILE_SIZE))
+		_reveal_fog_around_pos(boss_tile, 2)
+		_add_compass_marker(nearest_pos)
+		_create_floating_text("🧭 Boss: %s (%d cases)" % [nearest_name, nearest_dist], Color(1.0, 0.85, 0.2), _hero.position)
+		_spawn_burst_particles(nearest_pos, Color(1.0, 0.85, 0.2), 6)
+	else:
+		_create_floating_text("🧭 Aucun boss vivant trouvé !", Color(1.0, 0.5, 0.2), _hero.position)
+
+func _add_compass_marker(world_pos: Vector2) -> void:
+	if _compass_marker != null and is_instance_valid(_compass_marker):
+		_compass_marker.queue_free()
+		_compass_marker = null
+
+	_compass_marker = Sprite2D.new()
+	_compass_marker.name = "CompassMarker"
+	_compass_marker.position = world_pos
+	_compass_marker.z_index = 100
+
+	var img: Image = Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	for px in range(32):
+		for py in range(32):
+			var d: float = sqrt((px - 16)**2 + (py - 16)**2)
+			if d < 14:
+				img.set_pixel(px, py, Color(1.0, 0.85, 0.1, 0.8))
+			elif d < 16:
+				img.set_pixel(px, py, Color(1.0, 0.7, 0.1, 0.6))
+	for ax in range(10, 23):
+		for ay in range(2, 16):
+			if absi(ax - 16) <= (ay - 2) / 2:
+				img.set_pixel(ax, ay, Color(1.0, 0.95, 0.5, 0.9))
+	_compass_marker.texture = ImageTexture.create_from_image(img)
+	_compass_marker.scale = Vector2(2.0, 2.0)
+
+	add_child(_compass_marker)
+
+func _check_merchant_visit() -> void:
+	for i in range(_merchants.size()):
+		var m_pos: Vector2 = _merchants[i].position
+		var distance: float = _hero.position.distance_to(m_pos)
+		if distance < TILE_SIZE:
+			if i != _last_merchant_visit_index:
+				_last_merchant_visit_index = i
+				var m_name: String = _merchants[i].get("name", "Marchand")
+				if not _merchants[i].get("greeted", false):
+					_merchants[i]["greeted"] = true
+					_create_floating_text("🏪 " + m_name + " — Appuyez pour acheter", Color(0.9, 0.7, 0.3), _hero.position)
+					print("🏪 Marchand visité : ", m_name)
+			return
+	_last_merchant_visit_index = -1
 
 func _create_ui() -> void:
 	# Créer le HUD (CanvasLayer auto-contenu)
@@ -4048,6 +3958,8 @@ func _create_ui() -> void:
 	_hud.gm_pressed.connect(_on_gm_pressed)
 	_hud.dm_pressed.connect(_on_dm_pressed)
 	_hud.dbt_pressed.connect(_end_turn)
+	_hud.quest_pressed.connect(_toggle_quest_panel)
+	_hud.hero_selected.connect(_on_hud_hero_selected)
 
 	# Références aux labels du HUD
 	_label_gold = _hud.get_gold_label()
@@ -4085,6 +3997,12 @@ func _on_end_turn_pressed() -> void:
 # Variables pour la minimap
 var _minimap_panel: Control = null
 var _minimap_hero_dot: ColorRect = null
+var _minimap_bg: TextureRect = null
+var _minimap_city_dots: Array = []
+var _minimap_enemy_dots: Array = []
+var _minimap_boss_dots: Array = []
+var _minimap_resource_dots: Array = []
+var _minimap_treasure_dots: Array = []
 const MINIMAP_SIZE: int = 200
 const MINIMAP_SCALE: float = 10.0  # Échelle pour convertir la position du héros en coordonnées minimap
 
@@ -4093,167 +4011,409 @@ const ZOOM_MAX: float = 2.0
 const ZOOM_STEP: float = 0.1
 const ZOOM_DEFAULT_FACTOR: float = 1.42
 
+# Système de quêtes
+enum QuestType { VISIT_CITIES, BUILD_BUILDINGS, RECRUIT_UNITS, DEFEAT_ENEMIES, COLLECT_GOLD }
+const QUESTS: Array = [
+	{
+		"id": "q_explorer",
+		"title": "Explorateur",
+		"desc": "Visitez 3 villes différentes",
+		"type": QuestType.VISIT_CITIES,
+		"target": 3,
+		"reward_gold": 1000,
+		"reward_xp": 200,
+	},
+	{
+		"id": "q_builder",
+		"title": "Bâtisseur",
+		"desc": "Construisez 3 bâtiments",
+		"type": QuestType.BUILD_BUILDINGS,
+		"target": 3,
+		"reward_gold": 1500,
+		"reward_xp": 300,
+	},
+	{
+		"id": "q_army",
+		"title": "Petite armée",
+		"desc": "Recrutez 15 unités",
+		"type": QuestType.RECRUIT_UNITS,
+		"target": 15,
+		"reward_gold": 2000,
+		"reward_xp": 400,
+	},
+	{
+		"id": "q_warrior",
+		"title": "Guerrier",
+		"desc": "Vainquez 5 ennemis",
+		"type": QuestType.DEFEAT_ENEMIES,
+		"target": 5,
+		"reward_gold": 3000,
+		"reward_xp": 500,
+	},
+	{
+		"id": "q_rich",
+		"title": "Riche",
+		"desc": "Amassez 10000 pièces d'or",
+		"type": QuestType.COLLECT_GOLD,
+		"target": 10000,
+		"reward_gold": 5000,
+		"reward_xp": 1000,
+	},
+]
+
 # Villes sur la carte
 var _cities: Array = []
 var _city_visuals: Array = []
-const CITY_COUNT: int = 8
+const CITY_COUNT: int = 3
 const CITY_SIZE: int = 48
 
-# Ennemis sur la carte
+# === VILLES MAJEURES ===
+const MAJOR_CITIES: Dictionary = {
+	"ajim": {"name": "Ajim", "tile": Vector2i(24, 16), "desc": "Port de pêcheurs"},
+	"houmt_souk": {"name": "Houmt Souk", "tile": Vector2i(60, 56), "desc": "Cité marchande"},
+	"gullala": {"name": "Gullala", "tile": Vector2i(96, 16), "desc": "Village potier"},
+}
+
+# === BOSSES ===
+const BOSS_DATA: Array = [
+	{
+		"id": "boss_ajim",
+		"name": "Garde des Dunes d'Ajim",
+		"city_key": "ajim",
+		"offset": Vector2i(3, 2),
+		"army": [
+			{"type": "swordsman", "count": 15},
+			{"type": "archer", "count": 12},
+			{"type": "cavalier", "count": 5},
+		],
+		"gold_reward": 1500,
+		"xp_reward": 400,
+		"hero_unlock": {"name": "Ronin", "hp": 8, "max_hp": 8, "attack": 14, "defense": 9},
+	},
+	{
+		"id": "boss_houmt",
+		"name": "Seigneur des Docks",
+		"city_key": "houmt_souk",
+		"offset": Vector2i(-3, 2),
+		"army": [
+			{"type": "griffin", "count": 12},
+			{"type": "swordsman", "count": 10},
+			{"type": "angel", "count": 2},
+		],
+		"gold_reward": 2000,
+		"xp_reward": 500,
+		"hero_unlock": {"name": "Shugenja", "hp": 6, "max_hp": 6, "attack": 18, "defense": 6, "magic": 15},
+	},
+	{
+		"id": "boss_gullala",
+		"name": "Golem des Poteries",
+		"city_key": "gullala",
+		"offset": Vector2i(0, 3),
+		"army": [
+			{"type": "cavalier", "count": 10},
+			{"type": "angel", "count": 4},
+			{"type": "swordsman", "count": 20},
+		],
+		"gold_reward": 2500,
+		"xp_reward": 600,
+		"hero_unlock": {"name": "Moine-Guerrier", "hp": 7, "max_hp": 7, "attack": 12, "defense": 14},
+	},
+]
+
+# Ennemis errants (non-boss)
 var _enemies: Array = []
 var _enemy_visuals: Array = []
-const ENEMY_COUNT: int = 20
+const WANDERER_COUNT: int = 32
 const ENEMY_SIZE: int = 40
 
+# Bosses (runtime data)
+var _bosses: Array = []
+var _boss_visuals: Array = []
+var _unlocked_heroes: Array = []
+var _heroes_data: Array = []  # [{name, hp, max_hp, attack, defense, mp, max_mp, level, xp, node}]
+var _active_hero_index: int = 0
+
+# Marchands
+var _merchants: Array = []
+var _merchant_visuals: Array = []
+var _merchant_overlay: Panel = null
+var _merchant_title_label: Label = null
+var _merchant_items_container: VBoxContainer = null
+var _merchant_screen_open: bool = false
+var _selected_merchant_index: int = -1
+var _last_merchant_visit_index: int = -1
+
+# Inventaire / effets du joueur
+var _player_items: Array = []  # [{item_id: String, effect: String, value: int}]
+var _water_walk_turns: int = 0
+var _camera_follow_hero: bool = true
+var _compass_marker: Sprite2D = null
+
 # Système de combat
-var _hero_hp: int = 100
-var _hero_max_hp: int = 100
+var _hero_hp: int = 80
+var _hero_max_hp: int = 80
 var _hero_attack: int = 15
-var _hero_defense: int = 5
+var _hero_defense: int = 8
 var _in_combat: bool = false
 var _combat_manager: CanvasLayer = null
 var _current_enemy_index: int = -1
+var _current_boss_index: int = -1
+var _in_boss_fight: bool = false
 var _town_overlay: Panel = null
 var _town_title_label: Label = null
-var _game_overlay: Control = null
-var _game_over_active: bool = false
-
-# Système de niveau et expérience
-var _hero_level: int = 1
-var _hero_xp: int = 0
-var _hero_xp_to_next: int = 100
-const XP_PER_LEVEL: int = 100
-const XP_KILL_ENEMY: int = 50
-const XP_COLLECT_RESOURCE: int = 25
-const XP_VISIT_CITY: int = 40
-const XP_OPEN_TREASURE: int = 35
-
-# Temps du jeu (HoMM3 style)
-var _game_month: int = 1
-var _game_week: int = 1
-var _game_day: int = 1
-var _label_date: Label = null
-
-# Ressources sur la carte (mines, scieries)
-var _resources: Array = []
-var _resource_visuals: Array = []
-const RESOURCE_COUNT: int = 15
-const RESOURCE_SIZE: int = 36
-const RESOURCE_TYPES: Array = ["gold", "wood", "ore", "gold", "wood", "ore", "gold", "wood", "ore", "gold", "wood", "ore", "gold", "wood", "ore"]  # 15 éléments pour RESOURCE_COUNT = 15
-
-# Décorations sur la carte (arbres, rochers, tours)
-var _decorations: Array = []
-var _petals: Array = []  # Particules de pétales de cerisier
-var _japanese_buildings: Array = []  # Sprites de bâtiments japonais
-const TREE_COUNT: int = 22
-const ROCK_COUNT: int = 12
-const TOWER_COUNT: int = 8
-const DECORATION_SIZE: int = 32
-
-# Coffres au trésor
-var _treasures: Array = []
-var _treasure_visuals: Array = []
-const TREASURE_COUNT: int = 15
-const TREASURE_SIZE: int = 28
-
-# Particules de fumée (châteaux)
-var _smoke_particles: Array = []
-
-# Grille du terrain (stockée globalement pour accéder au coût de mouvement)
-var _terrain_grid: Array = []
-
-# ============================================================
-# SYSTÈME HOMURA : POINTS DE MOUVEMENT
-# ============================================================
-var _hero_mp: int = 0          # Points de mouvement actuels
-var _hero_max_mp: int = 20     # Points de mouvement max par jour
-var _terrain_move_cost: Dictionary = {
-	0: 1,   # Herbe = 1
-	1: 1,   # Route/Terre = 1 (chemin)
-	2: 999, # Eau = impossible
-	3: 3,   # Montagne = 3
-	4: 2,   # Forêt = 2
-	5: 1    # Prairie = 1
-}
-var _turn_in_progress: bool = false
-var _current_path: Array = []  # Chemin de tuiles calculé
-
-# ============================================================
-# SYSTÈME HOMURA : BROUILLARD DE GUERRE
-# ============================================================
-var _fog_grid: Array = []        # Grille du brouillard: 0=inconnu, 1=découvert, 2=visible
-const FOG_VISION_RANGE: int = 5  # Portée de vision du héros
-var _fog_overlay: Sprite2D = null
-var _fog_image: Image = null
-var _fog_texture: ImageTexture = null
-var _map_sprite: Sprite2D = null  # Référence au sprite de la carte
-var _anim_time: float = 0.0
-var _fx_frame: int = 0
-var _minimap_scale: float = 0.0
-const DEBUG_LOG: bool = false
-var _visited_cities: Dictionary = {}
-var _game_over_layer: CanvasLayer = null
-var _hud: CanvasLayer = null
-var _selected_dest_tile: Vector2i = Vector2i.ZERO
-var _camera_zoom_min: float = 0.28
-var _camera_zoom_default: float = 0.4
-const XP_DISCOVER_TILE: int = 3
-
-# ============================================================
-# SYSTÈME HOMURA : ARMÉE DU HÉROS
-# ============================================================
-# Unités de type: nom, hp, attack, defense, speed, sprite_type
-const UNIT_TYPES: Dictionary = {
-	"pikeman":    {"name": "Piquier",    "hp": 10, "attack": 4, "defense": 5, "speed": 4, "cost_g": 60,  "cost_w": 0,  "cost_o": 0},
-	"archer":     {"name": "Archer",     "hp": 8,  "attack": 6, "defense": 3, "speed": 4, "cost_g": 100, "cost_w": 0,  "cost_o": 0},
-	"griffin":    {"name": "Griffon",    "hp": 25, "attack": 8, "defense": 8, "speed": 6, "cost_g": 200, "cost_w": 0,  "cost_o": 0},
-	"swordsman":  {"name": "Épéiste",    "hp": 35, "attack": 10, "defense": 12, "speed": 5, "cost_g": 300, "cost_w": 0, "cost_o": 0},
-	"cavalier":   {"name": "Cavalier",   "hp": 40, "attack": 15, "defense": 15, "speed": 7, "cost_g": 400, "cost_w": 0, "cost_o": 0},
-	"angel":      {"name": "Ange",       "hp": 80, "attack": 25, "defense": 25, "speed": 9, "cost_g": 1000, "cost_w": 0, "cost_o": 0}
-}
-# Armée du héros: [{"type": "pikeman", "count": 12, "hp": 10}, ...]
-var _hero_army: Array = [
-	{"type": "pikeman", "count": 12, "hp": 10},
-	{"type": "archer", "count": 8, "hp": 8}
-]
-# Armées ennemies: même format, indexé par enemy_index
-var _enemy_armies: Array = []
-
-# ============================================================
-# SYSTÈME HOMURA : VILLES ET CONSTRUCTION
-# ============================================================
-# Bâtiments de ville: nom, cost_gold, cost_wood, cost_ore, effect
-const CITY_BUILDINGS: Dictionary = {
-	"town_hall":     {"name": "Hôtel de ville",   "cost_g": 500,  "cost_w": 5, "cost_o": 0,  "desc": "Revenus +500/jour"},
-	"tavern":        {"name": "Taverne",          "cost_g": 500,  "cost_w": 5, "cost_o": 0,  "desc": "+1 Moral"},
-	"barracks":      {"name": "Caserne",          "cost_g": 1000, "cost_w": 10, "cost_o": 0, "desc": "Recruter Piquiers"},
-	"archery_range": {"name": "Stand de tir",     "cost_g": 1000, "cost_w": 5, "cost_o": 5, "desc": "Recruter Archers"},
-	"griffin_tower": {"name": "Tour du Griffon",  "cost_g": 2000, "cost_w": 10, "cost_o": 10, "desc": "Recruter Griffons"},
-	"training_ground": {"name": "Terrain d'entraînement", "cost_g": 3000, "cost_w": 10, "cost_o": 15, "desc": "Recruter Épéistes"},
-	"stables":       {"name": "Écuries",          "cost_g": 2000, "cost_w": 10, "cost_o": 5, "desc": "Recruter Cavaliers"},
-	"angel_statue":  {"name": "Statue de l'Ange", "cost_g": 5000, "cost_w": 20, "cost_o": 20, "desc": "Recruter Anges"},
-	"fort":          {"name": "Fort",             "cost_g": 2000, "cost_w": 20, "cost_o": 20, "desc": "Défense +50%"},
-	"resource_silo": {"name": "Silo",             "cost_g": 500,  "cost_w": 0, "cost_o": 0,  "desc": "+1 Bois/Minerai/jour"}
-}
-# État des villes: [{"position": Vector2, "buildings": [], "garrison": [], "income": 500}, ...]
-var _cities_data: Array = []
+var _town_res_label: Label = null
+var _town_recruit_container: VBoxContainer = null
+var _town_build_container: VBoxContainer = null
+var _town_garrison_label: Label = null
 var _selected_city_index: int = -1
 var _town_screen_open: bool = false
 var _last_city_visit_index: int = -1
 
+var _quest_progress: Dictionary = {}
+var _quest_completed: Array = []
+var _quest_panel: Panel = null
+var _quest_panel_visible: bool = false
+
+# === SYSTÈME DE TERRAIN / MONDE ===
+var _map_sprite: Sprite2D = null
+var _sky_sprite: Sprite2D = null
+var _terrain_grid: Array = []  # tableau 2D [x][y] = type de terrain (int)
+var _terrain_move_cost: Dictionary = {}  # terrain_type -> coût de déplacement
+var _decorations: Array = []
+var _petals: Array = []
+var _japanese_buildings: Array = []
+var _japanese_building_data: Array = []
+var _ambient_timer: float = 0.0
+var _light_motes: Array = []
+var _smoke_particles: Array = []
+var _fireflies: Array = []
+var _lantern_glows: Array = []
+
+# === SYSTÈME DE BROUILLARD ===
+var _fog_grid: Array = []  # 0=inconnu, 1=découvert, 2=visible
+var _fog_overlay: Sprite2D = null
+var _fog_image: Image = null
+var _fog_texture: ImageTexture = null
+const FOG_VISION_RANGE: int = 5
+var _fog_current_alpha: Array = []  # tableau 2D [x][y] = alpha actuel
+var _fog_animating: Dictionary = {}  # "x,y" -> {"current": float, "target": float, "speed": float}
+
+# === RESSOURCES / TRÉSORS ===
+var _resources: Array = []
+var _resource_visuals: Array = []
+var _treasures: Array = []
+var _treasure_visuals: Array = []
+
+# === VILLES / ARMÉES ===
+var _cities_data: Array = []
+var _enemy_armies: Array = []
+var _hero_army: Array = []
+var _visited_cities: Dictionary = {}
+
+# === HÉROS : STATS ===
+var _hero_mp: int = 20
+var _hero_max_mp: int = 20
+var _hero_level: int = 1
+var _hero_xp: int = 0
+var _hero_xp_to_next: int = 100
+
+# === CALENDRIER ===
+var _game_day: int = 1
+var _game_week: int = 1
+var _game_month: int = 1
+
+# === GAME OVER ===
+var _game_over_active: bool = false
+var _game_over_layer: CanvasLayer = null
+var _game_overlay: Control = null
+
+# === ZOOM CAMÉRA ===
+var _camera_zoom_min: float = 0.0
+var _camera_zoom_default: float = 1.42
+
+# === HUD ===
+var _hud: CanvasLayer = null
+var _label_date: Label = null
+
+# === ANIMATION / PATHFINDING ===
+var _move_tween: Tween = null
+var _path_queue: Array = []
+var _is_pathfinding: bool = false
+var _is_dragging: bool = false
+var _drag_start_pos: Vector2 = Vector2.ZERO
+var _drag_threshold: float = 15.0
+var _anim_time: float = 0.0
+var _fx_frame: int = 0
+var _minimap_scale: float = 10.0
+
+# === MINIMAP ===
+const DEBUG_LOG: bool = false
+
+# === CONSTANTES XP ===
+const XP_VISIT_CITY: int = 100
+const XP_KILL_ENEMY: int = 150
+const XP_DISCOVER_TILE: int = 5
+const XP_COLLECT_RESOURCE: int = 20
+const XP_OPEN_TREASURE: int = 50
+const XP_PER_LEVEL: int = 150
+
+# === CONSTANTES RESSOURCES ===
+const RESOURCE_COUNT: int = 60
+const TREE_COUNT: int = 160
+const ROCK_COUNT: int = 60
+const TOWER_COUNT: int = 16
+const TREASURE_COUNT: int = 20
+const RESOURCE_TYPES: Array = ["gold", "wood", "ore"]
+
+# === CONSTANTES UNITÉS ===
+const UNIT_TYPES: Dictionary = {
+	"pikeman": {"name": "Piquier", "hp": 5, "attack": 6, "defense": 6, "cost_g": 40, "magic": 0, "magic_res": 2, "speed": 5},
+	"archer": {"name": "Archer", "hp": 5, "attack": 8, "defense": 5, "cost_g": 60, "magic": 0, "magic_res": 3, "speed": 6},
+	"griffin": {"name": "Griffon", "hp": 10, "attack": 10, "defense": 8, "cost_g": 120, "magic": 0, "magic_res": 4, "speed": 7},
+	"swordsman": {"name": "Épéiste", "hp": 10, "attack": 12, "defense": 12, "cost_g": 200, "magic": 0, "magic_res": 5, "speed": 5},
+	"cavalier": {"name": "Cavalier", "hp": 15, "attack": 14, "defense": 10, "cost_g": 280, "magic": 0, "magic_res": 4, "speed": 8},
+	"angel": {"name": "Ange", "hp": 20, "attack": 22, "defense": 14, "cost_g": 700, "magic": 15, "magic_res": 10, "speed": 9},
+}
+
+# === CONSTANTES BÂTIMENTS ===
+const CITY_BUILDINGS: Dictionary = {
+	"town_hall": {"name": "Hôtel de Ville", "cost_g": 500, "cost_w": 5, "cost_o": 5, "effect": "income+750"},
+	"barracks": {"name": "Caserne", "cost_g": 300, "cost_w": 5, "cost_o": 3, "effect": "pikeman"},
+	"archery_range": {"name": "Stand de Tir", "cost_g": 500, "cost_w": 8, "cost_o": 5, "effect": "archer"},
+	"griffin_tower": {"name": "Tour aux Griffons", "cost_g": 1000, "cost_w": 10, "cost_o": 8, "effect": "griffin"},
+	"training_ground": {"name": "Terrain d'Entraînement", "cost_g": 1400, "cost_w": 12, "cost_o": 10, "effect": "swordsman"},
+	"stables": {"name": "Écuries", "cost_g": 2000, "cost_w": 15, "cost_o": 12, "effect": "cavalier"},
+	"angel_statue": {"name": "Statue d'Ange", "cost_g": 3500, "cost_w": 20, "cost_o": 15, "effect": "angel"},
+	"resource_silo": {"name": "Silo à Ressources", "cost_g": 400, "cost_w": 8, "cost_o": 6, "effect": "wood+1, ore+1/jour"},
+}
+
+# === CONSTANTES MARCHANDS ===
+const MERCHANT_COUNT: int = 8
+const MERCHANT_ITEMS: Dictionary = {
+	"weapon_1": {"name": "Épine en acier", "desc": "ATK +3", "cost": 300, "cost_w": 2, "cost_o": 0, "icon": "⚔️", "effect": "attack", "value": 3},
+	"weapon_2": {"name": "Katana du vent", "desc": "ATK +6", "cost": 600, "cost_w": 0, "cost_o": 3, "icon": "🗡️", "effect": "attack", "value": 6},
+	"weapon_3": {"name": "Lame démoniaque", "desc": "ATK +10", "cost": 1200, "cost_w": 5, "cost_o": 5, "icon": "🔪", "effect": "attack", "value": 10},
+	"armor_1": {"name": "Armure de bambou", "desc": "DEF +3", "cost": 250, "cost_w": 3, "cost_o": 0, "icon": "🛡️", "effect": "defense", "value": 3},
+	"armor_2": {"name": "Armure de samouraï", "desc": "DEF +6", "cost": 500, "cost_w": 0, "cost_o": 4, "icon": "⛩️", "effect": "defense", "value": 6},
+	"armor_3": {"name": "Armure ancestrale", "desc": "DEF +10", "cost": 1000, "cost_w": 4, "cost_o": 4, "icon": "🏯", "effect": "defense", "value": 10},
+	"spell_fire": {"name": "Parchemin de feu", "desc": "Sort: Foudroie l'ennemi", "cost": 350, "cost_w": 0, "cost_o": 2, "icon": "🔥", "effect": "spell_fire", "value": 1},
+	"spell_heal": {"name": "Parchemin de soin", "desc": "Soigne 30 PV", "cost": 300, "cost_w": 2, "cost_o": 0, "icon": "💚", "effect": "spell_heal", "value": 30},
+	"compass": {"name": "Boussole sacrée", "desc": "Révèle le boss le plus proche", "cost": 200, "cost_w": 0, "cost_o": 0, "icon": "🧭", "effect": "compass", "value": 1},
+	"water_amulet": {"name": "Amulette aquatique", "desc": "Marche sur l'eau (5 tours)", "cost": 500, "cost_w": 3, "cost_o": 3, "icon": "🌊", "effect": "water_walk", "value": 5},
+}
+
+func _init_quests() -> void:
+	_quest_progress = {}
+	for q in QUESTS:
+		_quest_progress[q["id"]] = 0
+
+func _check_quest(qid: String, increment: int = 1) -> void:
+	if qid in _quest_completed:
+		return
+	var current: int = _quest_progress.get(qid, 0) + increment
+	_quest_progress[qid] = current
+	for q in QUESTS:
+		if q["id"] == qid:
+			if current >= q["target"]:
+				_complete_quest(q)
+			break
+
+func _complete_quest(q: Dictionary) -> void:
+	if q["id"] in _quest_completed:
+		return
+	_quest_completed.append(q["id"])
+	_gold += q["reward_gold"]
+	_gain_xp(q["reward_xp"])
+	var msg: String = "Quete terminee: %s! +%d or, +%d XP" % [q["title"], q["reward_gold"], q["reward_xp"]]
+	print("🏆 ", msg)
+	if _hero:
+		_create_floating_text(msg, Color(1.0, 0.85, 0.2), _hero.position)
+	_update_resource_labels()
+	_update_quest_panel()
+
+func _toggle_quest_panel() -> void:
+	if not _quest_panel:
+		_create_quest_panel()
+	_quest_panel_visible = not _quest_panel_visible
+	_quest_panel.visible = _quest_panel_visible
+
+func _create_quest_panel() -> void:
+	_quest_panel = Panel.new()
+	_quest_panel.name = "QuestPanel"
+	_quest_panel.visible = false
+	_quest_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_quest_panel.position = Vector2(80, 140)
+	_quest_panel.custom_minimum_size = Vector2(280, 260)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.10, 0.12, 0.92)
+	style.border_color = Color(0.6, 0.5, 0.2)
+	style.border_width_left = 2
+	style.border_width_right = 2
+	style.border_width_top = 2
+	style.border_width_bottom = 2
+	_quest_panel.add_theme_stylebox_override("panel", style)
+	add_child(_quest_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.position = Vector2(10, 10)
+	vbox.custom_minimum_size = Vector2(260, 240)
+	vbox.add_theme_constant_override("separation", 4)
+	_quest_panel.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "Objectifs"
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", Color(0.95, 0.85, 0.2))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title)
+
+	for q in QUESTS:
+		var hbox := HBoxContainer.new()
+		vbox.add_child(hbox)
+
+		var qlabel := Label.new()
+		qlabel.add_theme_font_size_override("font_size", 11)
+		qlabel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		qlabel.custom_minimum_size = Vector2(240, 0)
+		hbox.add_child(qlabel)
+		_quest_panel.set_meta("label_" + q["id"], qlabel)
+
+	_update_quest_panel()
+
+	var btn_close := Button.new()
+	btn_close.text = "Fermer"
+	btn_close.pressed.connect(_toggle_quest_panel)
+	vbox.add_child(btn_close)
+
+func _update_quest_panel() -> void:
+	if not _quest_panel:
+		return
+	for q in QUESTS:
+		var label: Label = _quest_panel.get_meta("label_" + q["id"], null)
+		if not label:
+			continue
+		var done: bool = q["id"] in _quest_completed
+		var cur: int = _quest_progress.get(q["id"], 0)
+		var status: String = "%s: %d/%d" % [q["title"], mini(cur, q["target"]), q["target"]]
+		if done:
+			label.add_theme_color_override("font_color", Color(0.4, 0.8, 0.4))
+			status += " ✓"
+		else:
+			label.add_theme_color_override("font_color", Color(0.8, 0.75, 0.65))
+		label.text = status
+
 func _create_cities() -> void:
-	# Créer des villes à des positions aléatoires sur la carte
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	rng.randomize()
-	
-	# Charger le sprite sheet de bâtiments japonais
+	# Créer les 3 villes majeures à des positions fixes
+
 	var japanese_sheet: Texture2D = load("res://assets/bat.png")
+	var city_keys: Array = MAJOR_CITIES.keys()
 	
 	for i in range(CITY_COUNT):
-		var city_x: int = rng.randi_range(2, _zone_w - 3)
-		var city_y: int = rng.randi_range(2, _zone_h - 3)
-		var world_x: float = (city_x * TILE_SIZE) + TILE_SIZE / 2
-		var world_y: float = (city_y * TILE_SIZE) + TILE_SIZE / 2
+		var key: String = city_keys[i]
+		var city_def: Dictionary = MAJOR_CITIES[key]
+		var city_tile: Vector2i = city_def["tile"]
+		var world_x: float = (city_tile.x * TILE_SIZE) + TILE_SIZE / 2
+		var world_y: float = (city_tile.y * TILE_SIZE) + TILE_SIZE / 2
 		var city_pos: Vector2 = Vector2(world_x, world_y)
 		
 		# Stocker la position de la ville
@@ -4262,83 +4422,60 @@ func _create_cities() -> void:
 		# Initialiser les données de la ville
 		_cities_data.append({
 			"position": city_pos,
-			"buildings": ["barracks", "archery_range"] if i == 0 else [],
+			"name": city_def["name"],
+			"tile": city_tile,
+			"buildings": ["barracks", "archery_range", "griffin_tower"] if i == 0 else [],
 			"garrison": [],
-			"income": 500,
+			"income": 1000,
 			"owned": i == 0,
 		})
 		
-		# Créer le visuel du château (2x2 tuiles = 128x128)
+		# Créer le visuel du château
 		var city_node: Node2D = Node2D.new()
-		city_node.name = "City_" + str(i)
+		city_node.name = "City_" + key
 		city_node.position = city_pos
 		add_child(city_node)
 		
-		# === CHÂTEAU PRINCIPAL vs CASERNES ===
-		# Ville 0 = Château principal (bâtiment japonais), plus grand et majestueux
-		# Villes 1+ = Casernes (bâtiments japonais), bâtiments militaires plus petits
 		var castle_sprite: Sprite2D = Sprite2D.new()
 		var is_main_castle: bool = (i == 0)
 		
 		if japanese_sheet != null:
-			var sheet_size: Vector2 = japanese_sheet.get_size()
-			var cols: int = 4
-			var rows: int = 3
-			var building_width: float = sheet_size.x / cols
-			var building_height: float = sheet_size.y / rows
-			var margin_x: float = building_width * 0.05
-			var margin_y: float = building_height * 0.05
-			
-			var building_index: int = 0 if is_main_castle else rng.randi_range(1, 11)
-			var col: int = building_index % cols
-			var row: int = building_index / cols
-			
-			var atlas: AtlasTexture = AtlasTexture.new()
-			atlas.atlas = japanese_sheet
-			atlas.region = Rect2(col * building_width + margin_x, row * building_height + margin_y, building_width - margin_x * 2, building_height - margin_y * 2)
-			
-			castle_sprite.texture = atlas
-			
+			var building_index: int = 0 if is_main_castle else (1 if i == 1 else 2)
+			var building_texture: Texture2D = _extract_building_texture(japanese_sheet, building_index)
+			castle_sprite.texture = building_texture
 			if is_main_castle:
+				_create_building_shadow(city_node, 120, 30, 0.30)
 				castle_sprite.scale = Vector2(2.0, 2.0)
 				castle_sprite.position = Vector2(0, -90)
 			else:
+				_create_building_shadow(city_node, 90, 22, 0.25)
 				castle_sprite.scale = Vector2(1.5, 1.5)
 				castle_sprite.position = Vector2(0, -64)
 		else:
-			# Fallback aux textures originales
 			if is_main_castle:
-				# === CHÂTEAU PRINCIPAL ===
 				var castle_texture: Texture2D = load("res://assets/external/castle.png")
 				if castle_texture != null:
 					castle_sprite.texture = castle_texture
-					# Château plus grand et plus imposant (cible ~256px)
 					var target_size: float = 256.0
 					var tex_size: Vector2 = castle_texture.get_size()
 					var scale_factor: float = target_size / max(tex_size.x, tex_size.y)
 					castle_sprite.scale = Vector2(scale_factor, scale_factor)
 				else:
-					# Fallback procédural plus grand
-					castle_sprite.texture = _generate_sprite("castle", 256, i * 1337)
+					castle_sprite.texture = _sg._generate_sprite("castle", 256, i * 1337)
 				castle_sprite.position = Vector2(0, -90)
 			else:
-				# === CASERNES (barracks.png) ===
 				var barracks_texture: Texture2D = load("res://assets/external/barracks.png")
 				if barracks_texture != null:
 					castle_sprite.texture = barracks_texture
-					# Casernes plus modestes (cible ~192px)
 					var target_size: float = 192.0
 					var tex_size: Vector2 = barracks_texture.get_size()
 					var scale_factor: float = target_size / max(tex_size.x, tex_size.y)
 					castle_sprite.scale = Vector2(scale_factor, scale_factor)
 				else:
-					# Fallback procédural standard
-					castle_sprite.texture = _generate_sprite("castle", 192, i * 1337)
+					castle_sprite.texture = _sg._generate_sprite("castle", 192, i * 1337)
 				castle_sprite.position = Vector2(0, -64)
 		city_node.add_child(castle_sprite)
 		
-		# === FUMÉE DES CHEMINÉES ===
-		# Le château principal a plus de fumée et plus haute
 		var chimney_count: int = rng.randi_range(2, 4)
 		if is_main_castle:
 			chimney_count = rng.randi_range(4, 7)
@@ -4353,7 +4490,6 @@ func _create_cities() -> void:
 						var salpha: float = (1.0 - sdist / 5.0) * 0.4
 						smoke_img.set_pixel(sx, sy, Color(0.8, 0.8, 0.8, salpha))
 			smoke.texture = ImageTexture.create_from_image(smoke_img)
-			# Fumée plus haute pour le château principal
 			var smoke_y: float = -110 if not is_main_castle else -150
 			smoke.position = Vector2(rng.randi_range(-40, 40), smoke_y)
 			smoke.set_z_index(1)
@@ -4366,16 +4502,13 @@ func _create_cities() -> void:
 				"size": 1.0
 			})
 		
-		# === BANNIERE DU CHÂTEAU PRINCIPAL ===
 		if is_main_castle:
 			var banner: Sprite2D = Sprite2D.new()
 			var banner_img: Image = Image.create(8, 24, false, Image.FORMAT_RGBA8)
 			banner_img.fill(Color(0, 0, 0, 0))
-			# Poteau
 			for by in range(24):
 				banner_img.set_pixel(3, by, Color(0.4, 0.3, 0.2))
 				banner_img.set_pixel(4, by, Color(0.35, 0.25, 0.18))
-			# Drapeau rouge
 			for bx in range(4, 8):
 				for by in range(4, 14):
 					if rng.randf() < 0.8:
@@ -4383,7 +4516,6 @@ func _create_cities() -> void:
 						if rng.randf() < 0.3:
 							bcol = Color(0.62, 0.06, 0.06)
 						banner_img.set_pixel(bx, by, bcol)
-			# Blason doré sur le drapeau
 			banner_img.set_pixel(5, 8, Color(0.9, 0.75, 0.2))
 			banner_img.set_pixel(6, 8, Color(0.85, 0.7, 0.15))
 			banner_img.set_pixel(5, 9, Color(0.85, 0.7, 0.15))
@@ -4394,30 +4526,32 @@ func _create_cities() -> void:
 			city_node.add_child(banner)
 		
 		_city_visuals.append(city_node)
-		print("Ville ", i + 1, " créée à la position : ", city_pos)
+		print("Ville ", city_def["name"], " créée à la position : ", city_pos)
 
 func _create_enemies() -> void:
-	# Créer des ennemis à des positions aléatoires sur la carte
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	# Créer des ennemis errants sur la carte (non-boss)
+
 	rng.randomize()
 	
-	for i in range(ENEMY_COUNT):
+	for i in range(WANDERER_COUNT):
 		var enemy_x: int = rng.randi_range(3, _zone_w - 4)
 		var enemy_y: int = rng.randi_range(3, _zone_h - 4)
 		var world_x: float = (enemy_x * TILE_SIZE) + TILE_SIZE / 2
 		var world_y: float = (enemy_y * TILE_SIZE) + TILE_SIZE / 2
 		var enemy_pos: Vector2 = Vector2(world_x, world_y)
 		
-		# Stocker la position de l'ennemi avec ses stats
 		var enemy_data: Dictionary = {
 			"position": enemy_pos,
 			"hp": 50,
 			"max_hp": 50,
 			"attack": 10,
 			"alive": true,
-			"name": "Armee #" + str(i + 1),
+			"name": "Armee errante #" + str(i + 1),
 			"gold_reward": rng.randi_range(50, 150),
 			"xp_reward": rng.randi_range(30, 80),
+			"mp": 6,
+			"max_mp": 6,
+			"detection_range": 6 + rng.randi_range(0, 3),
 		}
 		_enemies.append(enemy_data)
 		
@@ -4452,17 +4586,190 @@ func _create_enemies() -> void:
 			var enemy_types: Array = ["enemy_skeleton", "enemy_goblin", "enemy_archer", "enemy_swordsman", "enemy_tengu", "enemy_kappa", "enemy_ninja", "enemy_monk"]
 			var sprite_type: String = enemy_types[i % enemy_types.size()]
 			var enemy_sprite: Sprite2D = Sprite2D.new()
-			enemy_sprite.texture = _generate_sprite(sprite_type, 64, i * 7919)
+			enemy_sprite.texture = _sg._generate_sprite(sprite_type, 64, i * 7919)
 			enemy_sprite.position = Vector2(0, -16)
 			enemy_node.add_child(enemy_sprite)
 		
+		# HP bar background
+		var enemy_hp_bg: ColorRect = ColorRect.new()
+		enemy_hp_bg.name = "EnemyHPBG"
+		enemy_hp_bg.position = Vector2(-16, 16)
+		enemy_hp_bg.size = Vector2(32, 4)
+		enemy_hp_bg.color = Color(0.08, 0.08, 0.08)
+		enemy_hp_bg.z_index = 5
+		enemy_node.add_child(enemy_hp_bg)
+
+		# HP bar fill
+		var enemy_hp_fill: ColorRect = ColorRect.new()
+		enemy_hp_fill.name = "EnemyHPFill"
+		enemy_hp_fill.position = Vector2(-16, 16)
+		enemy_hp_fill.size = Vector2(32, 4)
+		enemy_hp_fill.color = Color(0.7, 0.15, 0.15)
+		enemy_hp_fill.z_index = 6
+		enemy_node.add_child(enemy_hp_fill)
+
 		_enemy_visuals.append(enemy_node)
 		
 		print("Ennemi ", i + 1, " créé à la position : ", enemy_pos, " (HP: 50)")
 
+func _create_bosses() -> void:
+	# Créer les 3 boss, chacun près d'une ville majeure
+	
+	for boss_def in BOSS_DATA:
+		var city_def: Dictionary = MAJOR_CITIES[boss_def["city_key"]]
+		var boss_tile: Vector2i = city_def["tile"] + boss_def["offset"]
+		var world_x: float = (boss_tile.x * TILE_SIZE) + TILE_SIZE / 2
+		var world_y: float = (boss_tile.y * TILE_SIZE) + TILE_SIZE / 2
+		var boss_pos: Vector2 = Vector2(world_x, world_y)
+		
+		var boss_data: Dictionary = {
+			"id": boss_def["id"],
+			"name": boss_def["name"],
+			"position": boss_pos,
+			"alive": true,
+			"gold_reward": boss_def["gold_reward"],
+			"xp_reward": boss_def["xp_reward"],
+			"army": boss_def["army"],
+			"hero_unlock": boss_def["hero_unlock"],
+		}
+		_bosses.append(boss_data)
+		
+		# Visuel du boss
+		var boss_node: Node2D = Node2D.new()
+		boss_node.name = "Boss_" + boss_def["id"]
+		boss_node.position = boss_pos
+		add_child(boss_node)
+		
+		# Sprite du boss (cercle rouge plus grand)
+		var boss_sprite: Sprite2D = Sprite2D.new()
+		var boss_img: Image = Image.create(48, 48, false, Image.FORMAT_RGBA8)
+		boss_img.fill(Color(0, 0, 0, 0))
+		for px in range(48):
+			for py in range(48):
+				var dist: float = sqrt((px - 24)**2 + (py - 24)**2)
+				if dist < 20:
+					boss_img.set_pixel(px, py, Color(0.8, 0.08, 0.08, 0.9))
+				elif dist < 22:
+					boss_img.set_pixel(px, py, Color(0.3, 0.05, 0.05, 0.7))
+		# Skull symbol (simple cross pattern)
+		var cx: int = 24
+		var cy: int = 24
+		for sk in range(-6, 7):
+			boss_img.set_pixel(cx + sk, cy, Color(0.95, 0.95, 0.95, 0.8))
+			boss_img.set_pixel(cx, cy + sk, Color(0.95, 0.95, 0.95, 0.8))
+		boss_img.set_pixel(cx - 2, cy - 2, Color(0.95, 0.95, 0.95, 0.8))
+		boss_img.set_pixel(cx + 2, cy - 2, Color(0.95, 0.95, 0.95, 0.8))
+		boss_img.set_pixel(cx - 2, cy + 2, Color(0.95, 0.95, 0.95, 0.8))
+		boss_img.set_pixel(cx + 2, cy + 2, Color(0.95, 0.95, 0.95, 0.8))
+		boss_sprite.texture = ImageTexture.create_from_image(boss_img)
+		boss_sprite.scale = Vector2(1.5, 1.5)
+		boss_sprite.position = Vector2(0, -20)
+		boss_node.add_child(boss_sprite)
+		
+		# Nom du boss
+		var boss_label: Label = Label.new()
+		boss_label.text = boss_def["name"]
+		boss_label.add_theme_font_size_override("font_size", 10)
+		boss_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+		boss_label.position = Vector2(-60, 20)
+		boss_label.size = Vector2(120, 20)
+		boss_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		boss_node.add_child(boss_label)
+		
+		# Glow effect
+		var glow: Sprite2D = Sprite2D.new()
+		var glow_img: Image = Image.create(64, 64, false, Image.FORMAT_RGBA8)
+		glow_img.fill(Color(0, 0, 0, 0))
+		for gx in range(64):
+			for gy in range(64):
+				var gdist: float = sqrt((gx - 32)**2 + (gy - 32)**2)
+				if gdist < 30:
+					var alpha: float = (1.0 - gdist / 30.0) * 0.25
+					glow_img.set_pixel(gx, gy, Color(0.8, 0.1, 0.1, alpha))
+		glow.texture = ImageTexture.create_from_image(glow_img)
+		glow.position = Vector2(0, -20)
+		glow.set_z_index(-1)
+		boss_node.add_child(glow)
+		
+		_boss_visuals.append(boss_node)
+		print("Boss créé : ", boss_def["name"], " à ", boss_pos)
+
+func _create_merchants() -> void:
+	rng.randomize()
+	var merchant_names: Array[String] = ["Yamada le marchand", "Fujiwara l'antiquaire", "Takashi le colporteur", "Tanaka l'alchimiste"]
+
+	for i in range(MERCHANT_COUNT):
+		var mx: int = rng.randi_range(3, _zone_w - 4)
+		var my: int = rng.randi_range(3, _zone_h - 4)
+		var world_x: float = (mx * TILE_SIZE) + TILE_SIZE / 2
+		var world_y: float = (my * TILE_SIZE) + TILE_SIZE / 2
+		var pos: Vector2 = Vector2(world_x, world_y)
+
+		# Stocker les données du marchand
+		_merchants.append({
+			"name": merchant_names[i % merchant_names.size()],
+			"position": pos,
+			"tile": Vector2i(mx, my),
+			"alive": true,
+		})
+
+		# Visuel
+		var node: Node2D = Node2D.new()
+		node.name = "Merchant_" + str(i)
+		node.position = pos
+		add_child(node)
+
+		var sprite: Sprite2D = Sprite2D.new()
+		var merchant_img: Image = Image.create(32, 32, false, Image.FORMAT_RGBA8)
+		merchant_img.fill(Color(0, 0, 0, 0))
+		# Robe violette de marchand
+		for px in range(32):
+			for py in range(32):
+				var d: float = sqrt((px - 16)**2 + (py - 16)**2)
+				if d < 14:
+					merchant_img.set_pixel(px, py, Color(0.55, 0.35, 0.65, 1.0))
+				elif d < 16:
+					merchant_img.set_pixel(px, py, Color(0.8, 0.7, 0.3, 1.0))
+		# Chapeau
+		for px in range(8, 24):
+			for py in range(4, 12):
+				merchant_img.set_pixel(px, py, Color(0.4, 0.2, 0.1, 1.0))
+		sprite.texture = ImageTexture.create_from_image(merchant_img)
+		sprite.position = Vector2(0, -16)
+		node.add_child(sprite)
+
+		var label: Label = Label.new()
+		label.text = "🏪"
+		label.add_theme_font_size_override("font_size", 12)
+		label.position = Vector2(-8, -28)
+		label.size = Vector2(16, 16)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		node.add_child(label)
+
+		_merchant_visuals.append(node)
+		print("Marchand créé : ", merchant_names[i % merchant_names.size()], " à (", mx, ",", my, ")")
+
+	_create_merchant_overlay()
+
+func _reveal_fog_around_pos(tile: Vector2i, radius: int) -> void:
+	var changed: Array = []
+	for dx in range(-radius, radius + 1):
+		for dy in range(-radius, radius + 1):
+			var tx: int = tile.x + dx
+			var ty: int = tile.y + dy
+			if tx < 0 or tx >= _zone_w or ty < 0 or ty >= _zone_h:
+				continue
+			var dist: int = absi(dx) + absi(dy)
+			if dist <= radius:
+				_fog_grid[tx][ty] = 2  # visible
+				_fog_current_alpha[tx][ty] = 0.0
+				changed.append(Vector2i(tx, ty))
+	if not changed.is_empty():
+		_refresh_fog_tiles(changed)
+
 func _create_resources() -> void:
 	# Créer des ressources à collecter sur la carte (mines, scieries)
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 	rng.randomize()
 	
 	for i in range(RESOURCE_COUNT):
@@ -4473,20 +4780,20 @@ func _create_resources() -> void:
 		var res_pos: Vector2 = Vector2(world_x, world_y)
 		
 		# Type de ressource
-		var res_type: String = RESOURCE_TYPES[i]
+		var res_type: String = RESOURCE_TYPES[i % RESOURCE_TYPES.size()]
 		var res_name: String = ""
-		var res_color: Color
+		var _res_color: Color
 		
 		match res_type:
 			"gold":
 				res_name = "Mine d'Or"
-				res_color = Color(0.9, 0.7, 0.1)  # Or
+				_res_color = Color(0.9, 0.7, 0.1)  # Or
 			"wood":
 				res_name = "Scierie"
-				res_color = Color(0.4, 0.25, 0.1)  # Marron bois
+				_res_color = Color(0.4, 0.25, 0.1)  # Marron bois
 			"ore":
 				res_name = "Mine de Minerai"
-				res_color = Color(0.5, 0.5, 0.5)  # Gris
+				_res_color = Color(0.5, 0.5, 0.5)  # Gris
 		
 		# Stocker les données de la ressource
 		var res_data: Dictionary = {
@@ -4508,24 +4815,24 @@ func _create_resources() -> void:
 		match res_type:
 			"gold":
 				res_name = "Mine d'Or"
-				res_color = Color(0.9, 0.7, 0.1)
+				_res_color = Color(0.9, 0.7, 0.1)
 				sprite_type = "mine_gold"
 			"wood":
 				res_name = "Scierie"
-				res_color = Color(0.4, 0.25, 0.1)
+				_res_color = Color(0.4, 0.25, 0.1)
 				sprite_type = "mine_wood"
 			"ore":
 				res_name = "Mine de Minerai"
-				res_color = Color(0.5, 0.5, 0.5)
+				_res_color = Color(0.5, 0.5, 0.5)
 				sprite_type = "mine_ore"
 		
 		var res_sprite: Sprite2D = Sprite2D.new()
-		res_sprite.texture = _generate_sprite(sprite_type, 96, i * 3571)
+		res_sprite.texture = _sg._generate_sprite(sprite_type, 96, i * 3571)
 		res_sprite.position = Vector2(0, -24)
 		res_node.add_child(res_sprite)
 		
 		# Ombre elliptique sous la ressource
-		_create_elliptical_shadow(res_node, 44, 14, 14, 0.30)
+		_sg._create_elliptical_shadow(res_node, 44, 14, 14, 0.30)
 		
 		_resource_visuals.append(res_node)
 		
@@ -4544,47 +4851,128 @@ func _create_minimap() -> void:
 	_minimap_panel.position = Vector2(3, 3)
 	minimap_container.add_child(_minimap_panel)
 
-	var bg: ColorRect = ColorRect.new()
-	bg.size = Vector2(194, 130)
-	bg.color = Color(0.2, 0.5, 0.2)
-	_minimap_panel.add_child(bg)
-
 	var scale_mini: float = min(194.0 / float(_zone_w * TILE_SIZE), 130.0 / float(_zone_h * TILE_SIZE))
 
-	for city_pos in _cities:
-		var dot: ColorRect = ColorRect.new()
-		dot.size = Vector2(8, 8)
-		dot.color = Color(1, 0, 0)
-		dot.position = Vector2(city_pos.x * scale_mini - 4, city_pos.y * scale_mini - 4)
-		_minimap_panel.add_child(dot)
+	# Terrain background
+	var bg_img: Image = Image.create(194, 130, false, Image.FORMAT_RGBA8)
+	bg_img.fill(Color(0.05, 0.05, 0.08))
+	var terrain_colors: Dictionary = {
+		0: Color(0.25, 0.50, 0.20),  # grass
+		1: Color(0.50, 0.40, 0.25),  # dirt
+		2: Color(0.15, 0.25, 0.50),  # water
+		3: Color(0.35, 0.30, 0.20),  # swamp
+		4: Color(0.45, 0.35, 0.25),  # desert
+		5: Color(0.55, 0.50, 0.45),  # mountain
+	}
+	for tx in range(_zone_w):
+		for ty in range(_zone_h):
+			var terrain: int = _terrain_grid[tx][ty] if tx < _terrain_grid.size() and ty < _terrain_grid[tx].size() else 0
+			var color: Color = terrain_colors.get(terrain, Color(0.2, 0.4, 0.2))
+			var px: float = tx * TILE_SIZE * scale_mini
+			var py: float = ty * TILE_SIZE * scale_mini
+			var ps: float = maxf(1.0, TILE_SIZE * scale_mini - 0.5)
+			var rect := Rect2i(int(px), int(py), int(ps), int(ps))
+			if rect.position.x >= 0 and rect.position.y >= 0 and rect.end.x <= 194 and rect.end.y <= 130:
+				bg_img.fill_rect(rect, color)
+	_minimap_bg = TextureRect.new()
+	_minimap_bg.texture = ImageTexture.create_from_image(bg_img)
+	_minimap_bg.size = Vector2(194, 130)
+	_minimap_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_minimap_panel.add_child(_minimap_bg)
 
+	# Fog overlay on minimap
+	var fog_img: Image = Image.create(194, 130, false, Image.FORMAT_RGBA8)
+	fog_img.fill(Color(0, 0, 0, 0))
+	if _fog_grid.size() > 0:
+		for tx in range(_zone_w):
+			for ty in range(_zone_h):
+				var state: int = _fog_grid[tx][ty] if tx < _fog_grid.size() and ty < _fog_grid[tx].size() else 0
+				var fog_alpha: float = 0.0 if state == 2 else (0.4 if state == 1 else 0.8)
+				if fog_alpha > 0:
+					var px: float = tx * TILE_SIZE * scale_mini
+					var py: float = ty * TILE_SIZE * scale_mini
+					var ps: float = maxf(1.0, TILE_SIZE * scale_mini - 0.5)
+					var rect := Rect2i(int(px), int(py), int(ps), int(ps))
+					if rect.position.x >= 0 and rect.position.y >= 0 and rect.end.x <= 194 and rect.end.y <= 130:
+						fog_img.fill_rect(rect, Color(0.02, 0.02, 0.05, fog_alpha))
+	var fog_rect: TextureRect = TextureRect.new()
+	fog_rect.texture = ImageTexture.create_from_image(fog_img)
+	fog_rect.size = Vector2(194, 130)
+	fog_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_minimap_panel.add_child(fog_rect)
+
+	# City dots
+	_minimap_city_dots = []
+	for i in range(_cities.size()):
+		var city_pos: Vector2 = _cities[i]
+		var is_main: bool = (i == 0)
+		var dot_size: float = 10.0 if is_main else 8.0
+		var dot: ColorRect = ColorRect.new()
+		dot.size = Vector2(dot_size, dot_size)
+		dot.color = Color(1, 0.85, 0.2) if is_main else Color(1, 0.3, 0.1)
+		dot.position = Vector2(city_pos.x * scale_mini - dot_size * 0.5, city_pos.y * scale_mini - dot_size * 0.5)
+		_minimap_panel.add_child(dot)
+		var border: ColorRect = ColorRect.new()
+		border.size = Vector2(dot_size + 2, dot_size + 2)
+		border.position = Vector2(-1, -1)
+		border.color = Color(1, 1, 1, 0.6) if is_main else Color(0.8, 0.8, 0.8, 0.4)
+		dot.add_child(border)
+		_minimap_city_dots.append(dot)
+
+	# Enemy dots
+	_minimap_enemy_dots = []
 	for enemy in _enemies:
 		var dot: ColorRect = ColorRect.new()
 		dot.size = Vector2(6, 6)
 		dot.color = Color(0.8, 0, 0.8)
 		dot.position = Vector2(enemy["position"].x * scale_mini - 3, enemy["position"].y * scale_mini - 3)
 		_minimap_panel.add_child(dot)
+		_minimap_enemy_dots.append(dot)
 
+	# Boss dots
+	_minimap_boss_dots = []
+	for boss_data in _bosses:
+		var dot: ColorRect = ColorRect.new()
+		dot.size = Vector2(10, 10)
+		dot.color = Color(0.9, 0.1, 0.1)
+		dot.position = Vector2(boss_data["position"].x * scale_mini - 5, boss_data["position"].y * scale_mini - 5)
+		_minimap_panel.add_child(dot)
+		var border: ColorRect = ColorRect.new()
+		border.size = Vector2(12, 12)
+		border.position = Vector2(-1, -1)
+		border.color = Color(1, 0.6, 0.2, 0.8)
+		dot.add_child(border)
+		_minimap_boss_dots.append(dot)
+
+	# Resource dots
+	_minimap_resource_dots = []
 	for res in _resources:
 		var dot: ColorRect = ColorRect.new()
 		dot.size = Vector2(5, 5)
 		dot.color = Color(1, 0.8, 0)
 		dot.position = Vector2(res["position"].x * scale_mini - 2.5, res["position"].y * scale_mini - 2.5)
 		_minimap_panel.add_child(dot)
+		_minimap_resource_dots.append(dot)
 
+	# Treasure dots
+	_minimap_treasure_dots = []
 	for chest in _treasures:
 		var dot: ColorRect = ColorRect.new()
 		dot.size = Vector2(6, 6)
 		dot.color = Color(1, 1, 1)
 		dot.position = Vector2(chest["position"].x * scale_mini - 3, chest["position"].y * scale_mini - 3)
 		_minimap_panel.add_child(dot)
+		_minimap_treasure_dots.append(dot)
 
-	var start_hero_x: float = (_zone_w / 2.0) * TILE_SIZE + TILE_SIZE / 2.0
-	var start_hero_y: float = (_zone_h / 2.0) * TILE_SIZE + TILE_SIZE / 2.0
+	# Hero dot with glow
+	var hero_pos: Vector2 = _hero.position if _hero else Vector2(
+		(_zone_w / 2.0) * TILE_SIZE + TILE_SIZE / 2.0,
+		(_zone_h / 2.0) * TILE_SIZE + TILE_SIZE / 2.0
+	)
 	_minimap_hero_dot = ColorRect.new()
 	_minimap_hero_dot.size = Vector2(10, 10)
 	_minimap_hero_dot.color = Color(0, 0.5, 1)
-	_minimap_hero_dot.position = Vector2(start_hero_x * scale_mini - 5, start_hero_y * scale_mini - 5)
+	_minimap_hero_dot.position = Vector2(hero_pos.x * scale_mini - 5, hero_pos.y * scale_mini - 5)
 	_minimap_panel.add_child(_minimap_hero_dot)
 
 	var hero_border: ColorRect = ColorRect.new()
@@ -4592,6 +4980,13 @@ func _create_minimap() -> void:
 	hero_border.position = Vector2(-1, -1)
 	hero_border.color = Color(1, 1, 1)
 	_minimap_hero_dot.add_child(hero_border)
+
+	var hero_glow_dot: ColorRect = ColorRect.new()
+	hero_glow_dot.name = "HeroGlowDot"
+	hero_glow_dot.size = Vector2(16, 16)
+	hero_glow_dot.position = Vector2(-3, -3)
+	hero_glow_dot.color = Color(0.3, 0.7, 1.0, 0.3)
+	_minimap_hero_dot.add_child(hero_glow_dot)
 
 	_minimap_scale = scale_mini
 	if DEBUG_LOG:
@@ -4604,6 +4999,20 @@ func _update_minimap() -> void:
 		_hero.position.x * _minimap_scale - 5.0,
 		_hero.position.y * _minimap_scale - 5.0
 	)
+
+func _refresh_minimap() -> void:
+	for i in range(_minimap_enemy_dots.size()):
+		if i < _enemies.size():
+			_minimap_enemy_dots[i].visible = _enemies[i].get("alive", true)
+	for i in range(_minimap_boss_dots.size()):
+		if i < _bosses.size():
+			_minimap_boss_dots[i].visible = _bosses[i].get("alive", true)
+	for i in range(_minimap_resource_dots.size()):
+		if i < _resources.size():
+			_minimap_resource_dots[i].visible = not _resources[i].get("collected", false)
+	for i in range(_minimap_treasure_dots.size()):
+		if i < _treasures.size():
+			_minimap_treasure_dots[i].visible = not _treasures[i].get("opened", false)
 
 func _create_floating_text(text: String, color: Color, pos: Vector2) -> void:
 	while _floating_texts.size() >= MAX_FLOATING_TEXTS:
@@ -4638,6 +5047,22 @@ func _create_floating_text(text: String, color: Color, pos: Vector2) -> void:
 			label.queue_free()
 	)
 
+func _spawn_burst_particles(origin: Vector2, color: Color, count: int = 8) -> void:
+	for i in range(count):
+		var p: ColorRect = ColorRect.new()
+		p.size = Vector2(4, 4)
+		p.color = color
+		p.position = origin - Vector2(2, 2)
+		p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(p)
+		var angle: float = (float(i) / float(count)) * TAU
+		var dist: float = 20.0 + randf() * 30.0
+		var target: Vector2 = origin + Vector2(cos(angle), sin(angle)) * dist
+		var pt = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		pt.tween_property(p, "position", target, 0.4)
+		pt.parallel().tween_property(p, "modulate:a", 0.0, 0.4)
+		pt.tween_callback(p.queue_free)
+
 func _gain_xp(amount: int) -> void:
 	if amount <= 0:
 		return
@@ -4653,14 +5078,55 @@ func _level_up() -> void:
 	_hero_xp_to_next = _hero_level * XP_PER_LEVEL
 	
 	# Augmenter les stats du héros
-	_hero_max_hp += 20
+	_hero_max_hp += 15
 	_hero_hp = _hero_max_hp  # Soigner complètement
-	_hero_attack += 5
-	_hero_defense += 3
+	_hero_attack += 3
+	_hero_defense += 2
 	
-	# Texte flottant LEVEL UP (gros et doré)
-	_create_floating_text("★ LEVEL UP! ★", Color(1.0, 0.85, 0.2), _hero.position)
-	_create_floating_text("Niveau " + str(_hero_level), Color(0.9, 0.9, 0.5), _hero.position - Vector2(0, 30))
+	# Screen flash doré
+	var flash = ColorRect.new()
+	flash.color = Color(1.0, 0.85, 0.2, 0.0)
+	flash.set_anchors_preset(Control.PRESET_FULL_RECT)
+	flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(flash)
+	var ft = create_tween().set_ease(Tween.EASE_OUT)
+	ft.tween_property(flash, "color:a", 0.4, 0.1).from(0.0)
+	ft.tween_property(flash, "color:a", 0.0, 0.6)
+	ft.tween_callback(flash.queue_free)
+
+	# LEVEL UP banner animé
+	var banner = Label.new()
+	banner.text = "★ LEVEL UP! ★"
+	banner.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	banner.add_theme_font_size_override("font_size", 36)
+	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	banner.set_anchors_preset(Control.PRESET_CENTER)
+	banner.position = Vector2(-200, -60)
+	banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(banner)
+	var bt = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	bt.tween_property(banner, "scale", Vector2(1.2, 1.2), 0.0)
+	bt.tween_property(banner, "scale", Vector2(1.0, 1.0), 0.4)
+	bt.parallel().tween_property(banner, "modulate:a", 1.0, 0.3).from(0.0)
+	bt.tween_interval(1.0)
+	bt.tween_property(banner, "modulate:a", 0.0, 0.8)
+	bt.tween_callback(banner.queue_free)
+
+	var level_label = Label.new()
+	level_label.text = "Niveau " + str(_hero_level)
+	level_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.5))
+	level_label.add_theme_font_size_override("font_size", 24)
+	level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	level_label.set_anchors_preset(Control.PRESET_CENTER)
+	level_label.position = Vector2(-100, -20)
+	level_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(level_label)
+	var lt = create_tween().set_ease(Tween.EASE_OUT)
+	lt.tween_property(level_label, "modulate:a", 1.0, 0.3).from(0.0)
+	lt.tween_interval(1.2)
+	lt.tween_property(level_label, "modulate:a", 0.0, 0.8)
+	lt.tween_callback(level_label.queue_free)
 	
 	print("🆙 LEVEL UP ! Niveau ", _hero_level, " atteint !")
 	_update_hero_panel()
@@ -4682,6 +5148,10 @@ func _on_fullscreen_toggled() -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	else:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+func _on_hud_hero_selected(id: int) -> void:
+	if id >= 0 and id < _heroes_data.size():
+		_switch_hero(id)
 
 func _on_gh_pressed() -> void:
 	# GH = Basculer la minimap
@@ -4749,6 +5219,22 @@ func _city_garrison_count(city_index: int) -> int:
 		return _cities_data[city_index].get("garrison", []).size()
 	return 0
 
+func _add_units_to_army(unit_type: String, count: int) -> void:
+	var unit_data: Dictionary = UNIT_TYPES.get(unit_type, {})
+	if unit_data.is_empty():
+		return
+	for unit in _hero_army:
+		if unit["type"] == unit_type:
+			unit["count"] += count
+			return
+	_hero_army.append({
+		"type": unit_type,
+		"count": count,
+		"hp": unit_data.get("hp", 10),
+		"attack": unit_data.get("attack", 4),
+		"defense": unit_data.get("defense", 4),
+	})
+
 func _creature_on_tile(tile: Vector2i) -> GameData.Creature:
 	if GameData.creatures_on_tile.has(tile):
 		return GameData.creatures_on_tile[tile]
@@ -4773,9 +5259,20 @@ func _save_game() -> void:
 		"ore": _ore,
 		"hero_pos": {"x": _hero.position.x, "y": _hero.position.y},
 		"hero_tile": {"x": _hero_tile.x, "y": _hero_tile.y},
+		"hero_mp": _hero_mp,
+		"hero_army": _hero_army,
 		"day": _game_day,
 		"week": _game_week,
 		"month": _game_month,
+		"cities_data": _cities_data,
+		"visited_cities": _visited_cities,
+		"quest_progress": _quest_progress,
+		"quest_completed": _quest_completed,
+		"enemies": _enemies,
+		"bosses": _bosses,
+		"unlocked_heroes": _unlocked_heroes,
+		"player_items": _player_items,
+		"water_walk_turns": _water_walk_turns,
 	}
 	
 	var json_string = JSON.stringify(save_data)
@@ -4834,6 +5331,39 @@ func _load_game() -> void:
 	_game_week = data.get("week", 1)
 	_game_month = data.get("month", 1)
 	
+	_hero_mp = data.get("hero_mp", _hero_max_mp)
+	_hero_army = data.get("hero_army", [])
+	_visited_cities = data.get("visited_cities", {})
+	_quest_progress = data.get("quest_progress", {})
+	_quest_completed = data.get("quest_completed", [])
+	
+	var loaded_cities = data.get("cities_data", [])
+	for i in range(loaded_cities.size()):
+		if i < _cities_data.size():
+			_cities_data[i]["owned"] = loaded_cities[i].get("owned", false)
+			_cities_data[i]["garrison"] = loaded_cities[i].get("garrison", [])
+			_cities_data[i]["income"] = loaded_cities[i].get("income", 500)
+	
+	var loaded_enemies = data.get("enemies", [])
+	for i in range(loaded_enemies.size()):
+		if i < _enemies.size():
+			_enemies[i]["alive"] = loaded_enemies[i].get("alive", true)
+	
+	var loaded_bosses = data.get("bosses", [])
+	for i in range(loaded_bosses.size()):
+		if i < _bosses.size():
+			_bosses[i]["alive"] = loaded_bosses[i].get("alive", true)
+	
+	var loaded_unlocked = data.get("unlocked_heroes", [])
+	_unlocked_heroes = loaded_unlocked.duplicate()
+	GameData.bosses_defeated = _unlocked_heroes.size()
+	GameData.unlocked_heroes = []
+	for h in _unlocked_heroes:
+		GameData.unlocked_heroes.append(h.get("name", "Heros"))
+
+	_player_items = data.get("player_items", [])
+	_water_walk_turns = data.get("water_walk_turns", 0)
+	
 	# Mettre à jour la caméra
 	_camera.position = _hero.position
 	
@@ -4862,14 +5392,31 @@ func _register_game_data() -> void:
 	var hero_data = GameData.Hero.new()
 	hero_data.id = 0
 	hero_data.name = "Samurai"
-	hero_data.sprite = null
-	hero_data.position = Vector2i(_zone_w / 2, _zone_h / 2)
+	var knight_sprite: Sprite2D = _hero.get_node_or_null("KnightSprite") if _hero else null
+	hero_data.sprite = knight_sprite.texture if knight_sprite else null
+	if not _cities_data.is_empty():
+		var cw: Vector2 = _cities_data[0]["position"]
+		var ct: Vector2i = Vector2i(int(cw.x / TILE_SIZE), int(cw.y / TILE_SIZE))
+		hero_data.position = ct
+		var offsets: Array[Vector2i] = [
+			Vector2i(2, 0), Vector2i(-2, 0), Vector2i(0, 2), Vector2i(0, -2),
+			Vector2i(2, 1), Vector2i(2, -1), Vector2i(-2, 1), Vector2i(-2, -1),
+			Vector2i(1, 2), Vector2i(-1, 2), Vector2i(1, -2), Vector2i(-1, -2),
+			Vector2i(3, 0), Vector2i(-3, 0), Vector2i(0, 3), Vector2i(0, -3),
+		]
+		for off in offsets:
+			var tx: int = ct.x + off.x
+			var ty: int = ct.y + off.y
+			if tx < 0 or tx >= _zone_w or ty < 0 or ty >= _zone_h:
+				continue
+			if _terrain_move_cost.get(_terrain_grid[tx][ty], 1) >= 999:
+				continue
+			hero_data.position = Vector2i(tx, ty)
+			break
+	else:
+		hero_data.position = Vector2i(_zone_w / 2, _zone_h / 2)
 	hero_data.owner = 0
-	hero_data.creatures = [
-		_creature("Piquier", 12),
-		_creature("Archer", 8),
-		_creature("Espadon", 4),
-	]
+	hero_data.creatures = []
 	GameData.heroes.append(hero_data)
 
 	# Enregistrer les villes
@@ -4877,7 +5424,7 @@ func _register_game_data() -> void:
 		var cdata = _cities_data[i]
 		var city_data = GameData.City.new()
 		city_data.id = i
-		city_data.name = "Ville %d" % (i + 1)
+		city_data.name = cdata.get("name", "Ville %d" % (i + 1))
 		city_data.position = _cities_data_to_tile(cdata["position"])
 		city_data.owner = 0 if cdata.get("owned", false) else 1
 		city_data.resource_type = "Or"
@@ -4893,10 +5440,10 @@ func _register_game_data() -> void:
 	print("✓ GameData enregistré: %d héros, %d villes" % [GameData.heroes.size(), GameData.cities.size()])
 
 func _spawn_neutral_creatures() -> void:
-	var rng = RandomNumberGenerator.new()
+
 	rng.randomize()
 	var types = ["Loup", "Gobelin", "Squelette", "Araignée", "Lézard"]
-	for i in range(12):
+	for i in range(36):
 		var tx = rng.randi_range(3, _zone_w - 4)
 		var ty = rng.randi_range(3, _zone_h - 4)
 		var tile = Vector2i(tx, ty)
@@ -4908,9 +5455,9 @@ func _spawn_neutral_creatures() -> void:
 		GameData.creatures_on_tile[tile] = c
 	print("✓ %d créatures neutres dispersées sur la carte" % GameData.creatures_on_tile.size())
 
-func _creature(name: String, amount: int) -> GameData.Creature:
+func _creature(creature_name: String, amount: int) -> GameData.Creature:
 	var c = GameData.Creature.new()
-	c.name = name
+	c.name = creature_name
 	c.amount = amount
 	return c
 

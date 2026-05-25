@@ -8,9 +8,10 @@ import os
 import struct
 import sys
 
-# Chemins
-HOMM3_PATH = r"C:\Program Files (x86)\Heroes of Might and Magic 3 Complete\Data"
-OUTPUT_PATH = r"C:\Dev\projet-jeu\homm-mobile\assets\homm3_original"
+# Chemins (configurables via CLI)
+import sys
+HOMM3_PATH = sys.argv[1] if len(sys.argv) > 1 else r".\homm3_data"
+OUTPUT_PATH = sys.argv[2] if len(sys.argv) > 2 else r".\homm3_original"
 
 # Fichiers LOD à explorer
 LOD_FILES = [

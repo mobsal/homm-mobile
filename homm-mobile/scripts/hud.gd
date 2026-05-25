@@ -19,6 +19,7 @@ var gm_btn: Button
 var dm_btn: Button
 
 var selection_panel: Panel
+var _jap_theme := JapaneseUITheme.new()
 
 # Resource / info labels (referenced from tile_map_world.gd)
 var label_gold: Label
@@ -35,6 +36,7 @@ signal gh_pressed()
 signal dh_pressed()
 signal gm_pressed()
 signal dm_pressed()
+signal quest_pressed()
 signal dbt_pressed()
 
 func _ready() -> void:
@@ -43,12 +45,16 @@ func _ready() -> void:
 	GameData.turn_ended.connect(_on_turn_ended)
 	_clear_all()
 
+func _exit_tree() -> void:
+	if GameData.selection_changed.is_connected(_on_selection_changed):
+		GameData.selection_changed.disconnect(_on_selection_changed)
+	if GameData.turn_ended.is_connected(_on_turn_ended):
+		GameData.turn_ended.disconnect(_on_turn_ended)
+
 func _build_layout():
 	var vp_size = get_viewport().get_visible_rect().size
 	var W = vp_size.x
 	var H = vp_size.y
-
-	_ensure_font_support()
 
 	# --- Top bar (180px) ---
 	var top = Control.new()
@@ -67,6 +73,7 @@ func _build_layout():
 	for i in range(3):
 		var btn = _make_top_btn("H%d" % (i+1))
 		btn.custom_minimum_size = Vector2(160, 54)
+		btn.tooltip_text = "Héros %d (sélectionne et centre la vue)" % [i+1]
 		btn.pressed.connect(_on_hero_btn_pressed.bind(i))
 		hero_col.add_child(btn)
 		h_btns.append(btn)
@@ -77,6 +84,7 @@ func _build_layout():
 		var btn = _make_top_btn("V%d" % (i+1))
 		btn.name = "V%d" % (i+1)
 		btn.custom_minimum_size = Vector2(v_col_w, 54)
+		btn.tooltip_text = "Ville %d (sélectionne la ville)" % [i+1]
 		btn.pressed.connect(_on_city_btn_pressed.bind(i))
 		top.add_child(btn)
 		btn.position = Vector2(W - v_col_w, 4 + i * 58)
@@ -93,24 +101,28 @@ func _build_layout():
 	gh_btn = _make_top_btn("GH")
 	gh_btn.custom_minimum_size = Vector2(190, 80)
 	gh_btn.position = Vector2(4, 4)
+	gh_btn.tooltip_text = "Carte (affiche/masque la minimap)"
 	gh_btn.pressed.connect(func(): gh_pressed.emit())
 	center.add_child(gh_btn)
 
 	dh_btn = _make_top_btn("DH")
 	dh_btn.custom_minimum_size = Vector2(190, 80)
 	dh_btn.position = Vector2(206, 4)
+	dh_btn.tooltip_text = "Détails du Héros (stats et armée)"
 	dh_btn.pressed.connect(func(): dh_pressed.emit())
 	center.add_child(dh_btn)
 
 	gm_btn = _make_top_btn("GM")
 	gm_btn.custom_minimum_size = Vector2(190, 80)
 	gm_btn.position = Vector2(4, 90)
+	gm_btn.tooltip_text = "Carte du Monde (zoom arrière)"
 	gm_btn.pressed.connect(func(): gm_pressed.emit())
 	center.add_child(gm_btn)
 
 	dm_btn = _make_top_btn("DM")
 	dm_btn.custom_minimum_size = Vector2(190, 80)
 	dm_btn.position = Vector2(206, 90)
+	dm_btn.tooltip_text = "Détails du contexte sélectionné"
 	dm_btn.pressed.connect(func(): dm_pressed.emit())
 	center.add_child(dm_btn)
 
@@ -120,12 +132,7 @@ func _build_layout():
 	selection_panel.size = Vector2(W, 280)
 	selection_panel.position = Vector2(0, 180)
 	selection_panel.visible = false
-	var sp_style = StyleBoxFlat.new()
-	sp_style.bg_color = Color(0.10, 0.08, 0.06, 0.95)
-	sp_style.border_color = Color(0.85, 0.25, 0.25)
-	sp_style.border_width_top = 2
-	sp_style.border_width_bottom = 2
-	selection_panel.add_theme_stylebox_override("panel", sp_style)
+	selection_panel.add_theme_stylebox_override("panel", _jap_theme.panel_style(8))
 	add_child(selection_panel)
 
 	# Top row: BT1 (name) | BT2 (color) | BT3 (res amount)
@@ -215,33 +222,24 @@ func _build_layout():
 	bottom_row.add_child(bt4_label)
 
 	# --- Minimap container (hidden by default, toggled via GH) ---
-	_minimap_container = Control.new()
+	_minimap_container = Panel.new()
 	_minimap_container.name = "MinimapContainer"
-	_minimap_container.size = Vector2(200, 136)
-	_minimap_container.position = Vector2(W / 2 - 100, 464)
+	_minimap_container.size = Vector2(210, 146)
+	_minimap_container.position = Vector2(W / 2 - 105, 460)
 	_minimap_container.visible = false
-	var mc_style = StyleBoxFlat.new()
-	mc_style.bg_color = Color(0.15, 0.10, 0.05, 0.95)
-	mc_style.border_color = Color(0.72, 0.52, 0.25)
-	mc_style.border_width_left = 3
-	mc_style.border_width_right = 3
-	mc_style.border_width_top = 3
-	mc_style.border_width_bottom = 3
-	mc_style.corner_radius_top_left = 6
-	mc_style.corner_radius_top_right = 6
-	mc_style.corner_radius_bottom_left = 6
-	mc_style.corner_radius_bottom_right = 6
-	var mc_panel = Panel.new()
-	mc_panel.size = Vector2(200, 136)
-	mc_panel.add_theme_stylebox_override("panel", mc_style)
-	_minimap_container.add_child(mc_panel)
+	_minimap_container.add_theme_stylebox_override("panel", _jap_theme.panel_style(8))
 	add_child(_minimap_container)
 
 	# --- Bottom bar (180px) ---
-	var bot = Control.new()
+	var bot = Panel.new()
 	bot.name = "BottomBar"
 	bot.size = Vector2(W, 180)
 	bot.position = Vector2(0, H - 180)
+	var bot_style := StyleBoxFlat.new()
+	bot_style.bg_color = Color(0.08, 0.06, 0.04, 0.95)
+	bot_style.border_color = Color(0.45, 0.38, 0.22)
+	bot_style.border_width_top = 2
+	bot.add_theme_stylebox_override("panel", bot_style)
 	add_child(bot)
 
 	# Left block: GBI + GBT
@@ -290,6 +288,31 @@ func _build_layout():
 	label_mp.add_theme_color_override("font_color", Color(0.35, 0.65, 0.45))
 	label_mp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	info_center.add_child(label_mp)
+
+	var quest_row = HBoxContainer.new()
+	quest_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	quest_row.add_theme_constant_override("separation", 8)
+	info_center.add_child(quest_row)
+
+	var quest_btn = Button.new()
+	quest_btn.text = "📜 Quetes"
+	quest_btn.tooltip_text = "Objectifs et quêtes en cours"
+	quest_btn.add_theme_font_size_override("font_size", 11)
+	quest_btn.add_theme_color_override("font_color", Color(0.95, 0.85, 0.2))
+	var qs = StyleBoxFlat.new()
+	qs.bg_color = Color(0.15, 0.10, 0.05)
+	qs.border_color = Color(0.6, 0.5, 0.2)
+	qs.border_width_left = 1
+	qs.border_width_right = 1
+	qs.border_width_top = 1
+	qs.border_width_bottom = 2
+	qs.corner_radius_top_left = 4
+	qs.corner_radius_top_right = 4
+	qs.corner_radius_bottom_left = 4
+	qs.corner_radius_bottom_right = 4
+	quest_btn.add_theme_stylebox_override("normal", qs)
+	quest_btn.pressed.connect(func(): quest_pressed.emit())
+	quest_row.add_child(quest_btn)
 
 	label_date = Label.new()
 	label_date.add_theme_font_size_override("font_size", 12)
@@ -352,6 +375,7 @@ func _build_layout():
 	dbt_button.size = Vector2(172, 126)
 	dbt_button.position = Vector2(4, 46)
 	dbt_button.text = "Terminer le tour"
+	dbt_button.tooltip_text = "Passe au tour suivant"
 	dbt_button.add_theme_font_size_override("font_size", 13)
 	dbt_button.add_theme_color_override("font_color", Color(1.0, 0.95, 0.85))
 	var dbt_normal = StyleBoxFlat.new()
@@ -370,32 +394,68 @@ func _build_layout():
 	dbt_hover.bg_color = Color(0.80, 0.30, 0.30)
 	dbt_button.add_theme_stylebox_override("hover", dbt_hover)
 	dbt_button.pressed.connect(func(): dbt_pressed.emit())
+	var dbt_s = dbt_normal.duplicate()
+	dbt_s.bg_color = Color(0.50, 0.14, 0.14)
+	dbt_button.add_theme_stylebox_override("pressed", dbt_s)
+	dbt_button.mouse_entered.connect(func():
+		var ht := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+		ht.tween_property(dbt_button, "scale", Vector2(1.06, 1.06), 0.12)
+	)
+	dbt_button.mouse_exited.connect(func():
+		var ht := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		ht.tween_property(dbt_button, "scale", Vector2(1.0, 1.0), 0.08)
+	)
 	right_block.add_child(dbt_button)
 
-func _ensure_font_support():
-	if not Label.new().has_theme_font_size_override("font_size"):
-		pass
+	# --- Fullscreen toggle (tiny button, bottom-right corner) ---
+	var fs_btn = Button.new()
+	fs_btn.name = "FullscreenBtn"
+	fs_btn.text = "⛶"
+	fs_btn.tooltip_text = "Plein écran / Fenêtré"
+	fs_btn.custom_minimum_size = Vector2(28, 28)
+	fs_btn.size = Vector2(28, 28)
+	fs_btn.position = Vector2(W - 108, H - 164)
+	var fs_style = StyleBoxFlat.new()
+	fs_style.bg_color = Color(0.15, 0.10, 0.06, 0.5)
+	fs_style.border_color = Color(0.45, 0.38, 0.22, 0.5)
+	fs_style.border_width_left = 1
+	fs_style.border_width_right = 1
+	fs_style.border_width_top = 1
+	fs_style.border_width_bottom = 1
+	fs_style.corner_radius_top_left = 4
+	fs_style.corner_radius_top_right = 4
+	fs_style.corner_radius_bottom_left = 4
+	fs_style.corner_radius_bottom_right = 4
+	fs_btn.add_theme_stylebox_override("normal", fs_style)
+	var fs_hover = fs_style.duplicate()
+	fs_hover.bg_color = Color(0.25, 0.18, 0.10, 0.7)
+	fs_btn.add_theme_stylebox_override("hover", fs_hover)
+	fs_btn.add_theme_font_size_override("font_size", 14)
+	fs_btn.add_theme_color_override("font_color", Color(0.8, 0.8, 0.75, 0.7))
+	fs_btn.pressed.connect(func():
+		var mode: DisplayServer.WindowMode = DisplayServer.window_get_mode()
+		if mode == DisplayServer.WINDOW_MODE_FULLSCREEN:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		else:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	)
+	add_child(fs_btn)
 
 func _make_top_btn(text: String) -> Button:
 	var btn = Button.new()
 	btn.text = text
 	btn.add_theme_font_size_override("font_size", 13)
 	btn.add_theme_color_override("font_color", Color(0.95, 0.85, 0.75))
-	var s = StyleBoxFlat.new()
-	s.bg_color = Color(0.12, 0.10, 0.06)
-	s.border_color = Color(0.45, 0.38, 0.22)
-	s.border_width_left = 1
-	s.border_width_right = 1
-	s.border_width_top = 1
-	s.border_width_bottom = 3
-	s.corner_radius_top_left = 6
-	s.corner_radius_top_right = 6
-	s.corner_radius_bottom_left = 6
-	s.corner_radius_bottom_right = 6
+	btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 0.9))
+	var s := _jap_theme.button_style(Color(0.12, 0.10, 0.06), Color(0.45, 0.38, 0.22))
+	var sh := _jap_theme.button_style(Color(0.22, 0.18, 0.10), Color(0.70, 0.55, 0.30))
 	btn.add_theme_stylebox_override("normal", s)
-	var sh = s.duplicate()
-	sh.bg_color = Color(0.22, 0.18, 0.10)
 	btn.add_theme_stylebox_override("hover", sh)
+	_jap_theme.add_hover_scale(btn, 1.04)
+	btn.pressed.connect(func():
+		if SFX and SFX.has_method("play_click"):
+			SFX.play_click()
+	)
 	return btn
 
 func _on_selection_changed(mode, id, tile):
@@ -410,6 +470,8 @@ func _on_selection_changed(mode, id, tile):
 				gbi_texture.texture = h.sprite
 				gbt_label.text = h.name
 				_fill_top_bar(h.owner, "", "", "")
+				_fill_creature_bar(h.creatures)
+				selection_panel.visible = true
 				dbi_label.text = "⏳ %d/%d" % [GameData.turn_counter, GameData.max_turns]
 				dbt_button.text = "Terminer le tour"
 
@@ -485,6 +547,7 @@ func _clear_top_bar():
 
 func _fill_creature_bar(creatures: Array):
 	_clear_creature_bar()
+	creature_bar.visible = not creatures.is_empty()
 	var slots = creature_bar.get_children()
 	for i in range(min(creatures.size(), slots.size())):
 		var c = creatures[i]
@@ -511,11 +574,18 @@ func _creature_on_tile(pos: Vector2i) -> GameData.Creature:
 	return null
 
 func _on_hero_btn_pressed(id: int):
-	if id < GameData.heroes.size():
-		GameData.set_selection(GameData.SelectionMode.HERO, id, GameData.heroes[id].position)
+	hero_selected.emit(id)
+
+func set_hero_names(names: Array) -> void:
+	for i in range(mini(names.size(), h_btns.size())):
+		h_btns[i].text = names[i]
+		h_btns[i].tooltip_text = names[i]
+	for i in range(names.size(), h_btns.size()):
+		h_btns[i].text = "H%d" % (i + 1)
+		h_btns[i].tooltip_text = "Héros %d" % (i + 1)
 
 func _on_city_btn_pressed(id: int):
-	if id < GameData.cities.size():
+	if id >= 0 and id < GameData.cities.size():
 		GameData.set_selection(GameData.SelectionMode.CITY, id, GameData.cities[id].position)
 
 func get_gold_label() -> Label:
