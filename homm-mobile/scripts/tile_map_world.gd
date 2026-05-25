@@ -2082,12 +2082,14 @@ func _input(event: InputEvent) -> void:
 	# Zoom avec la molette
 	if _camera != null and event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_wheel_debounce = 0.2
 			var new_zoom: float = _camera.zoom.x + ZOOM_STEP
 			new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
 			_camera.zoom = Vector2(new_zoom, new_zoom)
 			_clamp_camera_to_map()
 			return
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_wheel_debounce = 0.2
 			var new_zoom: float = _camera.zoom.x - ZOOM_STEP
 			new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
 			_camera.zoom = Vector2(new_zoom, new_zoom)
@@ -2096,6 +2098,8 @@ func _input(event: InputEvent) -> void:
 
 	# Drag tactile ou souris pour déplacer la caméra
 	if event is InputEventScreenTouch:
+		if _wheel_debounce > 0.0:
+			return
 		if event.pressed:
 			_is_dragging = false
 			_drag_start_pos = event.position
@@ -2108,6 +2112,8 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventScreenDrag:
+		if _wheel_debounce > 0.0:
+			return
 		if not _is_dragging:
 			if _drag_start_pos.distance_to(event.position) > _drag_threshold:
 				_is_dragging = true
@@ -2118,6 +2124,8 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if _wheel_debounce > 0.0:
+			return
 		if event.pressed:
 			_is_dragging = false
 			_drag_start_pos = event.position
@@ -2130,6 +2138,8 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		if _wheel_debounce > 0.0:
+			return
 		if not _is_dragging:
 			if _drag_start_pos.distance_to(event.position) > _drag_threshold:
 				_is_dragging = true
@@ -2380,6 +2390,8 @@ func _process(delta: float) -> void:
 		return
 	_anim_time += delta
 	_fx_frame += 1
+	if _wheel_debounce > 0:
+		_wheel_debounce -= delta
 	if _map_sprite and _map_sprite.material is ShaderMaterial:
 		_map_sprite.material.set_shader_parameter("time", _anim_time * 0.5)
 	if _sky_sprite and _sky_sprite.material is ShaderMaterial:
@@ -4242,6 +4254,7 @@ var _is_pathfinding: bool = false
 var _is_dragging: bool = false
 var _drag_start_pos: Vector2 = Vector2.ZERO
 var _drag_threshold: float = 15.0
+var _wheel_debounce: float = 0.0
 var _anim_time: float = 0.0
 var _fx_frame: int = 0
 var _minimap_scale: float = 10.0
