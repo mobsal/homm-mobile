@@ -4022,6 +4022,21 @@ func _create_ui() -> void:
 
 	_create_minimap()
 
+	# Overlay système (pause, zoom) toujours au-dessus de tout
+	var sys_overlay := CanvasLayer.new()
+	sys_overlay.name = "SystemOverlay"
+	sys_overlay.layer = 128
+	add_child(sys_overlay)
+	var pause_btn := _hud.get_pause_button()
+	if pause_btn:
+		pause_btn.reparent(sys_overlay)
+	var zin_btn := _hud.get_zoom_in_button()
+	if zin_btn:
+		zin_btn.reparent(sys_overlay)
+	var zout_btn := _hud.get_zoom_out_button()
+	if zout_btn:
+		zout_btn.reparent(sys_overlay)
+
 	print("✓ HUD instancié et connecté")
 
 func _create_decorated_panel(size: Vector2) -> Panel:

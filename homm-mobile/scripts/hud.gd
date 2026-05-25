@@ -677,6 +677,15 @@ func get_minimap_container() -> Control:
 func is_paused() -> bool:
 	return _pause_active
 
+func get_pause_button() -> Button:
+	return _pause_btn
+
+func get_zoom_in_button() -> Button:
+	return find_child("ZoomInBtn", true, false) as Button
+
+func get_zoom_out_button() -> Button:
+	return find_child("ZoomOutBtn", true, false) as Button
+
 func _on_pause_pressed() -> void:
 	if SFX and SFX.has_method("play_click"):
 		SFX.play_click()

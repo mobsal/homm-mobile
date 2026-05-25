@@ -11,8 +11,9 @@ config_version=5
 [application]
 
 config/name="Homura : Heroes of Conquest"
-config/description="Homura : Heroes of Conquest - Jeu de stratégie au tour par tour"
+config/description="Homura : Heroes of Conquest - Jeu de stratǸgie au tour par tour"
 config/version="1.0.0"
+config/icon="res://icon.svg"
 run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.6")
 
