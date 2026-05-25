@@ -65,7 +65,6 @@ func play_menu() -> void:
 func stop_menu() -> void:
 	_menu_player.stop()
 	_menu_restart_timer.stop()
-	_start_bgm()
 
 func play() -> void:
 	if _player and not _player.playing:
@@ -107,12 +106,14 @@ func switch_to_exploration() -> void:
 	_menu_restart_timer.stop()
 	_theme = "exploration"
 	if _explo_stream:
+		_player.volume_db = -14.0
 		_player.stream = _explo_stream
 		_player.play()
 
 func _start_bgm() -> void:
 	_theme = "exploration"
 	if _explo_stream:
+		_player.volume_db = -14.0
 		_player.stream = _explo_stream
 		_player.play()
 

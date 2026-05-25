@@ -113,6 +113,8 @@ func _async_init() -> void:
 	print("✓ Effet de sélection doré autour du héros")
 	print("✓ Prêt pour l'aventure !")
 	LoadingScreen.hide_loading()
+	if RetroBGM and RetroBGM.has_method("switch_to_exploration"):
+		RetroBGM.switch_to_exploration()
 
 func _create_map() -> void:
 	print("=== _create_map ===")
