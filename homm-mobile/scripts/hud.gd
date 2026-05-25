@@ -31,6 +31,7 @@ var label_date: Label
 var _in_submenu: bool = false
 var _pause_active: bool = false
 var _pause_overlay: Panel = null
+var _pause_layer: CanvasLayer = null
 var _pause_btn: Button
 
 signal hero_selected(id: int)
@@ -704,6 +705,11 @@ func _show_pause_menu() -> void:
 		return
 	var vp := get_viewport().get_visible_rect().size
 
+	_pause_layer = CanvasLayer.new()
+	_pause_layer.name = "PauseLayer"
+	_pause_layer.layer = 128
+	add_child(_pause_layer)
+
 	_pause_overlay = Panel.new()
 	_pause_overlay.name = "PauseOverlay"
 	_pause_overlay.size = vp
@@ -712,7 +718,7 @@ func _show_pause_menu() -> void:
 	ol_style.bg_color = Color(0.0, 0.0, 0.0, 0.7)
 	_pause_overlay.add_theme_stylebox_override("panel", ol_style)
 	_pause_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(_pause_overlay)
+	_pause_layer.add_child(_pause_overlay)
 
 	var menu_panel := Panel.new()
 	menu_panel.name = "PauseMenuPanel"
@@ -808,6 +814,9 @@ func _hide_pause_menu() -> void:
 	if _pause_overlay:
 		_pause_overlay.queue_free()
 		_pause_overlay = null
+	if _pause_layer:
+		_pause_layer.queue_free()
+		_pause_layer = null
 	_pause_active = false
 	pause_state_changed.emit(false)
 
