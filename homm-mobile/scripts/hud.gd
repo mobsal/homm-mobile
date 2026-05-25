@@ -29,6 +29,9 @@ var label_mp: Label
 var label_date: Label
 
 var _in_submenu: bool = false
+var _pause_active: bool = false
+var _pause_overlay: Panel = null
+var _pause_btn: Button
 
 signal hero_selected(id: int)
 signal city_selected(id: int)
@@ -38,6 +41,7 @@ signal gm_pressed()
 signal dm_pressed()
 signal quest_pressed()
 signal dbt_pressed()
+signal pause_state_changed(is_paused: bool)
 
 func _ready() -> void:
 	_build_layout()
@@ -441,6 +445,32 @@ func _build_layout():
 	)
 	add_child(fs_btn)
 
+	# --- Pause button (bottom-left, opposite of End Turn) ---
+	_pause_btn = Button.new()
+	_pause_btn.name = "PauseBtn"
+	_pause_btn.text = "⏸"
+	_pause_btn.position = Vector2(8, H - 224)
+	_pause_btn.size = Vector2(50, 44)
+	var pbs := StyleBoxFlat.new()
+	pbs.bg_color = Color(0.12, 0.10, 0.06, 0.85)
+	pbs.border_color = Color(0.45, 0.38, 0.22)
+	pbs.border_width_left = 1
+	pbs.border_width_right = 1
+	pbs.border_width_top = 1
+	pbs.border_width_bottom = 1
+	pbs.corner_radius_top_left = 6
+	pbs.corner_radius_top_right = 6
+	pbs.corner_radius_bottom_left = 6
+	pbs.corner_radius_bottom_right = 6
+	_pause_btn.add_theme_stylebox_override("normal", pbs)
+	var pbs_hover := pbs.duplicate()
+	pbs_hover.bg_color = Color(0.22, 0.18, 0.10, 0.9)
+	_pause_btn.add_theme_stylebox_override("hover", pbs_hover)
+	_pause_btn.add_theme_font_size_override("font_size", 18)
+	_pause_btn.add_theme_color_override("font_color", Color(0.95, 0.85, 0.75))
+	_pause_btn.pressed.connect(_on_pause_pressed)
+	add_child(_pause_btn)
+
 func _make_top_btn(text: String) -> Button:
 	var btn = Button.new()
 	btn.text = text
@@ -602,5 +632,142 @@ func get_date_label() -> Label:
 
 func get_minimap_container() -> Control:
 	return _minimap_container
+
+func is_paused() -> bool:
+	return _pause_active
+
+func _on_pause_pressed() -> void:
+	if SFX and SFX.has_method("play_click"):
+		SFX.play_click()
+	_pause_active = true
+	pause_state_changed.emit(true)
+	_show_pause_menu()
+
+func _show_pause_menu() -> void:
+	if _pause_overlay:
+		return
+	var vp := get_viewport().get_visible_rect().size
+
+	_pause_overlay = Panel.new()
+	_pause_overlay.name = "PauseOverlay"
+	_pause_overlay.size = vp
+	_pause_overlay.position = Vector2.ZERO
+	var ol_style := StyleBoxFlat.new()
+	ol_style.bg_color = Color(0.0, 0.0, 0.0, 0.7)
+	_pause_overlay.add_theme_stylebox_override("panel", ol_style)
+	_pause_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_pause_overlay)
+
+	var menu_panel := Panel.new()
+	menu_panel.name = "PauseMenuPanel"
+	menu_panel.size = Vector2(360, 420)
+	menu_panel.position = Vector2(vp.x / 2 - 180, vp.y / 2 - 210)
+	var mp_style := _jap_theme.panel_style(12)
+	_pause_overlay.add_child(menu_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vbox.add_theme_constant_override("separation", 12)
+	vbox.add_theme_constant_override("margin_left", 24)
+	vbox.add_theme_constant_override("margin_right", 24)
+	vbox.add_theme_constant_override("margin_top", 24)
+	vbox.add_theme_constant_override("margin_bottom", 24)
+	menu_panel.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "Pause"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", Color(0.95, 0.80, 0.20))
+	vbox.add_child(title)
+
+	vbox.add_child(_make_spacer(8))
+
+	var btn_continue := Button.new()
+	btn_continue.text = "Continuer"
+	btn_continue.custom_minimum_size = Vector2(280, 50)
+	btn_continue.add_theme_font_size_override("font_size", 18)
+	btn_continue.add_theme_color_override("font_color", Color(0.95, 0.9, 0.8))
+	var bs := _jap_theme.button_style(Color(0.12, 0.10, 0.06), Color(0.50, 0.40, 0.25))
+	var bs_hover := _jap_theme.button_style(Color(0.22, 0.18, 0.10), Color(0.75, 0.60, 0.35))
+	btn_continue.add_theme_stylebox_override("normal", bs)
+	btn_continue.add_theme_stylebox_override("hover", bs_hover)
+	btn_continue.pressed.connect(_hide_pause_menu)
+	_jap_theme.add_hover_scale(btn_continue, 1.04)
+	vbox.add_child(btn_continue)
+
+	vbox.add_child(_make_spacer(4))
+
+	var vol_label := Label.new()
+	vol_label.text = "Volume Musique"
+	vol_label.add_theme_color_override("font_color", Color(0.9, 0.85, 0.75))
+	vbox.add_child(vol_label)
+
+	var slider := HSlider.new()
+	slider.min_value = -30.0
+	slider.max_value = 0.0
+	slider.value = _get_bgm_volume()
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.value_changed.connect(_set_bgm_volume)
+	vbox.add_child(slider)
+
+	vbox.add_child(_make_spacer(4))
+
+	var btn_menu := Button.new()
+	btn_menu.text = "Menu Principal"
+	btn_menu.custom_minimum_size = Vector2(280, 50)
+	btn_menu.add_theme_font_size_override("font_size", 18)
+	btn_menu.add_theme_color_override("font_color", Color(0.95, 0.9, 0.8))
+	btn_menu.add_theme_stylebox_override("normal", bs)
+	btn_menu.add_theme_stylebox_override("hover", bs_hover)
+	btn_menu.pressed.connect(_on_return_to_menu)
+	_jap_theme.add_hover_scale(btn_menu, 1.04)
+	vbox.add_child(btn_menu)
+
+	var btn_quit := Button.new()
+	btn_quit.text = "Quitter"
+	btn_quit.custom_minimum_size = Vector2(280, 50)
+	btn_quit.add_theme_font_size_override("font_size", 18)
+	btn_quit.add_theme_color_override("font_color", Color(0.85, 0.75, 0.65))
+	btn_quit.add_theme_stylebox_override("normal", bs)
+	btn_quit.add_theme_stylebox_override("hover", bs_hover)
+	btn_quit.pressed.connect(_on_quit_from_pause)
+	_jap_theme.add_hover_scale(btn_quit, 1.04)
+	vbox.add_child(btn_quit)
+
+func _hide_pause_menu() -> void:
+	if _pause_overlay:
+		_pause_overlay.queue_free()
+		_pause_overlay = null
+	_pause_active = false
+	pause_state_changed.emit(false)
+
+func _get_bgm_volume() -> float:
+	var bgm = get_node_or_null("/root/RetroBGM")
+	if bgm and bgm.has_method("get_volume"):
+		return bgm.get_volume()
+	return -8.0
+
+func _set_bgm_volume(value: float) -> void:
+	var bgm = get_node_or_null("/root/RetroBGM")
+	if bgm and bgm.has_method("set_volume"):
+		bgm.set_volume(value)
+
+func _on_return_to_menu() -> void:
+	_hide_pause_menu()
+	var bgm = get_node_or_null("/root/RetroBGM")
+	if bgm and bgm.has_method("play_menu"):
+		bgm.play_menu()
+	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+
+func _on_quit_from_pause() -> void:
+	get_tree().quit()
+
+func _make_spacer(h: int) -> ColorRect:
+	var s := ColorRect.new()
+	s.custom_minimum_size = Vector2(0, h)
+	s.color = Color.TRANSPARENT
+	s.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return s
 
 var _minimap_container: Control

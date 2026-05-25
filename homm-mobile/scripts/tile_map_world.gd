@@ -2073,6 +2073,9 @@ func _input(event: InputEvent) -> void:
 	if _in_combat or _town_screen_open or _merchant_screen_open or _game_over_active:
 		return
 
+	if _pause_active:
+		return
+
 	if _is_pathfinding:
 		return
 
@@ -3972,6 +3975,7 @@ func _create_ui() -> void:
 	_hud.dbt_pressed.connect(_end_turn)
 	_hud.quest_pressed.connect(_toggle_quest_panel)
 	_hud.hero_selected.connect(_on_hud_hero_selected)
+	_hud.pause_state_changed.connect(_on_pause_state_changed)
 
 	# Références aux labels du HUD
 	_label_gold = _hud.get_gold_label()
@@ -4167,6 +4171,7 @@ var _hero_max_hp: int = 80
 var _hero_attack: int = 15
 var _hero_defense: int = 8
 var _in_combat: bool = false
+var _pause_active: bool = false
 var _combat_manager: CanvasLayer = null
 var _current_enemy_index: int = -1
 var _current_boss_index: int = -1
@@ -5252,6 +5257,9 @@ func _creature_on_tile(tile: Vector2i) -> GameData.Creature:
 	if GameData.creatures_on_tile.has(tile):
 		return GameData.creatures_on_tile[tile]
 	return null
+
+func _on_pause_state_changed(is_paused: bool) -> void:
+	_pause_active = is_paused
 
 func _on_dbt_pressed() -> void:
 	# DBT = Fin de tour + journal
