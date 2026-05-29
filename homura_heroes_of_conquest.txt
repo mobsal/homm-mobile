@@ -1,0 +1,63 @@
+=== HOMURA: HEROES OF CONQUEST ===
+
+Homura: Heroes of Conquest est un jeu de stratégie au tour par tour
+pour mobile (Android & iOS), inspiré du gameplay de Heroes of Might
+and Magic 3 mais avec un thème japonais médiéval.
+
+Le joueur incarne un seigneur de guerre qui explore une carte, recrute
+des troupes, combat des ennemis et agrandit son territoire.
+
+--- FONCTIONNALITÉS ---
+
+CARTE ET DÉPLACEMENT
+  - Carte hexagonale avec différentes cases (plaine, forêt, montagne, eau)
+  - Déplacement au doigt : scroller la carte en glissant
+  - Zoom avant/arrière : pincer avec deux doigts, ou utiliser les boutons
+    + et − à l'écran, ou la molette de la souris (Bluestacks)
+  - Le jeu s'adapte à la fois au tactile et à la souris/clavier
+
+INTERFACE
+  - Barre du haut : accès rapide aux héros (H1/H2/H3), gestion des
+    villes (V1/V2/V3), et boutons de filtre GH/DH/GM/DM pour la carte
+  - Panneau de sélection : quand vous cliquez sur quelque chose, ses
+    infos s'affichent ici (nom, valeur, ressources)
+  - Barre du bas : résumé de la sélection en cours, ressources
+    (or/bois/minerai), points de mouvement, date, et bouton "Fin de tour"
+  - Minimap : affichée/cachée via le bouton GH
+
+SYSTÈME DE JEU
+  - Tour par tour : chaque joueur agit à son tour, terminez votre tour
+    avec le bouton "Fin de tour"
+  - Héros : chaque héros a des caractéristiques, peut explorer, combattre
+    et gérer des troupes
+  - Villes : capturez et gérez des villes pour produire des ressources
+    et recrues
+  - Ressources : or, bois, minerai — collectez-les pour recruter et
+    construire
+
+COMBAT
+  - Combat 1v1 au tour par tour entre héros
+  - Barres de vie, sorts, buffs, défense, rage
+  - Journal de combat détaillé
+
+MUSIQUE ET AMBIANCE
+  - Musique thème au menu principal
+  - Musique d'exploration calme pendant le jeu
+  - Musique de combat dynamique quand un combat commence
+  - Volume réglable depuis le menu pause
+
+PAUSE ET SAUVEGARDE
+  - Bouton pause (⏸) en bas à gauche : accessible à tout moment,
+    même en plein combat
+  - Menu pause : Continuer, Sauvegarder, Volume, Menu Principal, Quitter
+  - La sauvegarde écrase la précédente (une seule partie à la fois)
+
+CONTRÔLES SPÉCIFIQUES (ÉMULATEUR B LUESTACKS)
+  - Boutons zoom + et − dédiés (la molette peut ne pas être détectée)
+  - Pincement à deux doigts pour zoomer
+  - Tous les boutons accessibles au clic
+
+--- PLATEFORMES ---
+
+Développé pour Android via Godot 4.6.
+Jouable sur téléphone (tactile) et sur émulateur Bluestacks (souris + clavier).

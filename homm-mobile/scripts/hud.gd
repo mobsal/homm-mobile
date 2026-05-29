@@ -232,10 +232,25 @@ func _build_layout():
 	# --- Minimap container (hidden by default, toggled via GH) ---
 	_minimap_container = Panel.new()
 	_minimap_container.name = "MinimapContainer"
-	_minimap_container.size = Vector2(210, 146)
-	_minimap_container.position = Vector2(W / 2 - 105, 460)
+	_minimap_container.size = Vector2(570, 530)
+	_minimap_container.position = Vector2(W / 2 - 285, 120)
 	_minimap_container.visible = false
-	_minimap_container.add_theme_stylebox_override("panel", _jap_theme.panel_style(8))
+	var mm_style := StyleBoxFlat.new()
+	mm_style.bg_color = Color(0.07, 0.06, 0.05, 0.97)
+	mm_style.border_color = Color(0.55, 0.45, 0.25)
+	mm_style.border_width_top = 2
+	mm_style.border_width_bottom = 2
+	mm_style.border_width_left = 2
+	mm_style.border_width_right = 2
+	mm_style.corner_radius_top_left = 10
+	mm_style.corner_radius_top_right = 10
+	mm_style.corner_radius_bottom_left = 10
+	mm_style.corner_radius_bottom_right = 10
+	mm_style.content_margin_top = 10
+	mm_style.content_margin_bottom = 10
+	mm_style.content_margin_left = 10
+	mm_style.content_margin_right = 10
+	_minimap_container.add_theme_stylebox_override("panel", mm_style)
 	add_child(_minimap_container)
 
 	# --- Bottom bar (180px) ---

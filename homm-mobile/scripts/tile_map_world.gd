@@ -2,6 +2,7 @@ extends Node2D
 
 # Constants pour la carte
 const TILE_SIZE: int = 64
+const COMBAT_SCENE := preload("res://scenes/combat_manager.tscn")
 
 # Dimensions du monde (NOUVEAUX noms pour éviter le cache Godot)
 var _map_width: int = 120
@@ -61,7 +62,26 @@ func _ready() -> void:
 	print("Création de la carte avec TileMapLayer")
 	_async_init()
 
+func _restore_save_seed() -> void:
+	if not FileAccess.file_exists("user://save_game.json"):
+		return
+	var file = FileAccess.open("user://save_game.json", FileAccess.READ)
+	if not file:
+		return
+	var json_string = file.get_as_text()
+	file.close()
+	var json = JSON.new()
+	if json.parse(json_string) != OK:
+		return
+	var data = json.get_data()
+	if typeof(data) != TYPE_DICTIONARY or not data.has("rng_seed"):
+		return
+	rng.seed = data["rng_seed"]
+	print("🌱 Graine RNG restaurée: ", rng.seed)
+
 func _async_init() -> void:
+	if GameData.should_load_save:
+		_restore_save_seed()
 	await _create_map()
 	await get_tree().process_frame
 
@@ -87,10 +107,8 @@ func _async_init() -> void:
 	_init_quests()
 	_update_fog_of_war()
 	_create_sky_background()
-	await get_tree().process_frame
 
-	var combat_scene := preload("res://scenes/combat_manager.tscn")
-	_combat_manager = combat_scene.instantiate()
+	_combat_manager = COMBAT_SCENE.instantiate()
 	_combat_manager.combat_victory.connect(_on_combat_victory)
 	_combat_manager.combat_defeat.connect(_on_combat_defeat)
 	_combat_manager.combat_fled.connect(_on_combat_fled)
@@ -100,8 +118,8 @@ func _async_init() -> void:
 
 	if GameData.should_load_save:
 		_load_game()
-
-	_spawn_neutral_creatures()
+	else:
+		_spawn_neutral_creatures()
 
 	print("✓ Carte créée : ", _world_w, "x", _world_h, " tuiles")
 	print("✓ ", CITY_COUNT, " villes créées sur la carte")
@@ -351,9 +369,6 @@ func _generate_tile_texture(tile_type: int) -> Image:
 	return img
 
 func _generate_map_image() -> ImageTexture:
-
-	rng.randomize()
-	
 	var w: int = _zone_w
 	var h: int = _zone_h
 	
@@ -527,34 +542,26 @@ func _generate_map_image() -> ImageTexture:
 	var img_width: int = w * TILE_SIZE
 	var img_height: int = h * TILE_SIZE
 	var map_image: Image = Image.create(img_width, img_height, false, Image.FORMAT_RGBA8)
-	
+
+	# Pré-générer UNE texture par type de terrain (au lieu de 9600 appels)
+	var tile_cache: Array[Image] = []
+	for t in range(6):
+		tile_cache.append(_generate_tile_texture(t))
+
+	var tile_rect := Rect2i(0, 0, TILE_SIZE, TILE_SIZE)
 	for x in range(w):
-		if x % 20 == 0 and x > 0:
+		if x % 30 == 0 and x > 0:
 			await get_tree().process_frame
 		for y in range(h):
-			var tx: int = x * TILE_SIZE
-			var ty: int = y * TILE_SIZE
 			var tile_type: int = _terrain_grid[x][y]
-			
-			# Générer la tuile texturée détaillée
-			var tile_img: Image = _generate_tile_texture(tile_type)
-			
-			# Copier la tuile sur la carte
-			for px in range(TILE_SIZE):
-				for py in range(TILE_SIZE):
-					map_image.set_pixel(tx + px, ty + py, tile_img.get_pixel(px, py))
-	
+			map_image.blit_rect(tile_cache[tile_type], tile_rect, Vector2i(x * TILE_SIZE, y * TILE_SIZE))
+
 	await get_tree().process_frame
 
 	# === TRANSITIONS DOUCES ENTRE BIOMES (pixel-perfect avec bruit) ===
-	# Pour chaque tuile, on regarde ses voisins et on crée des transitions douces
 	for x in range(w):
 		for y in range(h):
-			var tx: int = x * TILE_SIZE
-			var ty: int = y * TILE_SIZE
 			var current_type: int = _terrain_grid[x][y]
-			
-			# Vérifier les voisins pour les transitions
 			for dx in range(-1, 2):
 				for dy in range(-1, 2):
 					if dx == 0 and dy == 0:
@@ -563,20 +570,25 @@ func _generate_map_image() -> ImageTexture:
 					var ny: int = y + dy
 					if nx < 0 or nx >= w or ny < 0 or ny >= h:
 						continue
-					
-					var neighbor_type: int = _terrain_grid[nx][ny]
-					if neighbor_type == current_type:
+					if _terrain_grid[nx][ny] == current_type:
 						continue
-					
-					# Pour chaque pixel sur le bord de la tuile actuelle
+			
+					var tx: int = x * TILE_SIZE
+					var ty: int = y * TILE_SIZE
 					var start_px: int = 0 if dx != 1 else TILE_SIZE - 8
 					var start_py: int = 0 if dy != 1 else TILE_SIZE - 8
 					var end_px: int = TILE_SIZE if dx != -1 else 8
 					var end_py: int = TILE_SIZE if dy != -1 else 8
-					
+
+					var neighbor_type: int = _terrain_grid[nx][ny]
+					var blend_color: Color = base_colors[neighbor_type]
+					if current_type == 2:
+						blend_color = C_SAND
+					elif current_type == 3:
+						blend_color = C_ROCK
+
 					for px in range(start_px, end_px):
 						for py in range(start_py, end_py):
-							# Distance au bord (0 = au bord, 1 = au centre)
 							var dist_to_edge: float = 0.0
 							if dx == -1:
 								dist_to_edge = px / 8.0
@@ -586,62 +598,52 @@ func _generate_map_image() -> ImageTexture:
 								dist_to_edge = max(dist_to_edge, py / 8.0)
 							elif dy == 1:
 								dist_to_edge = max(dist_to_edge, (TILE_SIZE - 1 - py) / 8.0)
-							
 							dist_to_edge = clamp(dist_to_edge, 0.0, 1.0)
-							
-							# Ajouter du bruit pour des bords irréguliers
+
 							var noise: float = rng.randf_range(-0.3, 0.3)
 							var blend: float = clamp(dist_to_edge + noise, 0.0, 1.0)
-							
-							# Ne mélanger que sur les 8 pixels du bord
+
 							if dist_to_edge < 1.0:
 								var current_color: Color = map_image.get_pixel(tx + px, ty + py)
-								var neighbor_base: Color = base_colors[neighbor_type]
-								
-								# Spécial: eau → sable, montagne → roche
-								var blend_color: Color = neighbor_base
-								if current_type == 2:
-									blend_color = C_SAND
-								elif current_type == 3:
-									blend_color = C_ROCK
-								
-								# Mélanger avec alpha
 								var alpha: float = 1.0 - blend
 								var result: Color = current_color.lerp(blend_color, alpha * 0.5)
 								map_image.set_pixel(tx + px, ty + py, result)
-	
-	await get_tree().process_frame
 
-	# === EFFET DE VIGNETTE (coins plus foncés pour l'atmosphère) ===
-	for x in range(w):
-		for y in range(h):
-			var tx: int = x * TILE_SIZE
-			var ty: int = y * TILE_SIZE
-			# Calculer la distance aux bords (0 au centre, 1 aux bords)
-			var dist_x: float = abs(x - w / 2.0) / (w / 2.0)
-			var dist_y: float = abs(y - h / 2.0) / (h / 2.0)
-			var vignette: float = max(dist_x, dist_y)
-			vignette = vignette * vignette * 0.15  # Effet subtil
-			
-			if vignette > 0.02:
-				for px in range(TILE_SIZE):
-					for py in range(TILE_SIZE):
-						var c: Color = map_image.get_pixel(tx + px, ty + py)
-						c.r = clamp(c.r - vignette, 0, 1)
-						c.g = clamp(c.g - vignette, 0, 1)
-						c.b = clamp(c.b - vignette, 0, 1)
-						map_image.set_pixel(tx + px, ty + py, c)
-	
 	await get_tree().process_frame
 
 	# === TEXTURATION DES ROUTES (cailloux, traces, bordures) ===
 	for x in range(w):
 		for y in range(h):
-			if _terrain_grid[x][y] == 1:  # C'est une route/terre
-				var tx: int = x * TILE_SIZE
-				var ty: int = y * TILE_SIZE
-				# Vérifier si c'est une route (connectée à d'autres routes)
-				var is_road: bool = false
+			if _terrain_grid[x][y] != 1:
+				continue
+			var tx: int = x * TILE_SIZE
+			var ty: int = y * TILE_SIZE
+			var is_road: bool = false
+			for dx in range(-1, 2):
+				for dy in range(-1, 2):
+					if dx == 0 and dy == 0:
+						continue
+					var nx: int = x + dx
+					var ny: int = y + dy
+					if nx >= 0 and nx < w and ny >= 0 and ny < h and _terrain_grid[nx][ny] == 1:
+						is_road = true
+						break
+				if is_road:
+					break
+
+			if is_road:
+				for _i in range(6):
+					var rx: int = tx + rng.randi_range(2, TILE_SIZE - 4)
+					var ry: int = ty + rng.randi_range(2, TILE_SIZE - 4)
+					map_image.set_pixel(rx, ry, Color(0.62, 0.52, 0.38))
+
+				if rng.randf() < 0.35:
+					var track_x: int = tx + rng.randi_range(8, TILE_SIZE - 16)
+					var track_y: int = ty + rng.randi_range(10, TILE_SIZE - 14)
+					for ddx in range(rng.randi_range(4, 8)):
+						map_image.set_pixel(track_x + ddx, track_y, Color(0.48, 0.38, 0.24))
+						map_image.set_pixel(track_x + ddx, track_y + 2, Color(0.48, 0.38, 0.24))
+
 				for dx in range(-1, 2):
 					for dy in range(-1, 2):
 						if dx == 0 and dy == 0:
@@ -649,166 +651,115 @@ func _generate_map_image() -> ImageTexture:
 						var nx: int = x + dx
 						var ny: int = y + dy
 						if nx >= 0 and nx < w and ny >= 0 and ny < h:
-							if _terrain_grid[nx][ny] == 1:
-								is_road = true
-								break
-						if is_road:
-							break
-				
-				if is_road:
-					# Cailloux sur la route
-					for _i in range(12):
-						var rx: int = tx + rng.randi_range(2, TILE_SIZE - 4)
-						var ry: int = ty + rng.randi_range(2, TILE_SIZE - 4)
-						var rcol: Color = Color(0.62, 0.52, 0.38)
-						if rng.randf() < 0.4:
-							rcol = Color(0.68, 0.58, 0.42)
-						map_image.set_pixel(rx, ry, rcol)
-						if rng.randf() < 0.5:
-							map_image.set_pixel(rx + 1, ry, rcol)
-					
-					# Traces de pas (lignes plus foncées)
-					if rng.randf() < 0.5:
-						var track_x: int = tx + rng.randi_range(8, TILE_SIZE - 16)
-						var track_y: int = ty + rng.randi_range(10, TILE_SIZE - 14)
-						for dx in range(rng.randi_range(4, 10)):
-							map_image.set_pixel(track_x + dx, track_y, Color(0.48, 0.38, 0.24))
-							map_image.set_pixel(track_x + dx, track_y + 2, Color(0.48, 0.38, 0.24))
-					
-					# Bordures de route (herbe qui dépasse)
-					for dx in range(-1, 2):
-						for dy in range(-1, 2):
-							if dx == 0 and dy == 0:
-								continue
-							var nx: int = x + dx
-							var ny: int = y + dy
-							if nx >= 0 and nx < w and ny >= 0 and ny < h:
-								if _terrain_grid[nx][ny] == 0 or _terrain_grid[nx][ny] == 5:  # Herbe voisine
-									# Petites touffes d'herbe qui débordent
-									var edge_px: int = tx + (TILE_SIZE - 4 if dx == 1 else 4) if dx != 0 else tx + rng.randi_range(4, TILE_SIZE - 4)
-									var edge_py: int = ty + (TILE_SIZE - 4 if dy == 1 else 4) if dy != 0 else ty + rng.randi_range(4, TILE_SIZE - 4)
-									for _j in range(3):
-										var gx: int = edge_px + rng.randi_range(-2, 2)
-										var gy: int = edge_py + rng.randi_range(-2, 2)
-										map_image.set_pixel(clamp(gx, tx, tx + TILE_SIZE - 1), clamp(gy, ty, ty + TILE_SIZE - 1), Color(0.24, 0.46, 0.14))
+							if _terrain_grid[nx][ny] == 0 or _terrain_grid[nx][ny] == 5:
+								var edge_px: int = tx + (TILE_SIZE - 4 if dx == 1 else 4) if dx != 0 else tx + rng.randi_range(4, TILE_SIZE - 4)
+								var edge_py: int = ty + (TILE_SIZE - 4 if dy == 1 else 4) if dy != 0 else ty + rng.randi_range(4, TILE_SIZE - 4)
+								for _j in range(2):
+									var gx: int = edge_px + rng.randi_range(-2, 2)
+									var gy: int = edge_py + rng.randi_range(-2, 2)
+									map_image.set_pixel(clamp(gx, tx, tx + TILE_SIZE - 1), clamp(gy, ty, ty + TILE_SIZE - 1), Color(0.24, 0.46, 0.14))
 	
 	await get_tree().process_frame
 	
 	# === BORDS DE PLAGE (sable) autour de l'eau ===
 	for x in range(w):
 		for y in range(h):
-			if _terrain_grid[x][y] == 2:  # Eau
-				var tx: int = x * TILE_SIZE
-				var ty: int = y * TILE_SIZE
-				# Pour chaque voisin non-eau, dessiner du sable sur le bord
-				for dx in range(-1, 2):
-					for dy in range(-1, 2):
-						if dx == 0 and dy == 0:
-							continue
-						var nx: int = x + dx
-						var ny: int = y + dy
-						if nx < 0 or nx >= w or ny < 0 or ny >= h:
-							continue
-						if _terrain_grid[nx][ny] != 2:  # Voisin = terre/herbe
-							# Bord de plage sur la tuile d'eau (côté du voisin)
-							var beach_w: int = 10  # Largeur plage en pixels
-							if dx == -1:  # Voisin à gauche
-								for px in range(beach_w):
-									for py in range(TILE_SIZE):
-										var alpha: float = 1.0 - (px / float(beach_w))
-										if rng.randf() < alpha * 0.6:
-											var sand_col: Color = Color(0.72 + rng.randf() * 0.08, 0.62 + rng.randf() * 0.06, 0.44 + rng.randf() * 0.04)
-											map_image.set_pixel(tx + px, ty + py, sand_col)
-							elif dx == 1:  # Voisin à droite
-								for px in range(TILE_SIZE - beach_w, TILE_SIZE):
-									for py in range(TILE_SIZE):
-										var alpha: float = (px - (TILE_SIZE - beach_w)) / float(beach_w)
-										if rng.randf() < alpha * 0.6:
-											var sand_col: Color = Color(0.72 + rng.randf() * 0.08, 0.62 + rng.randf() * 0.06, 0.44 + rng.randf() * 0.04)
-											map_image.set_pixel(tx + px, ty + py, sand_col)
-							if dy == -1:  # Voisin en haut
-								for px in range(TILE_SIZE):
-									for py in range(beach_w):
-										var alpha: float = 1.0 - (py / float(beach_w))
-										if rng.randf() < alpha * 0.6:
-											var sand_col: Color = Color(0.72 + rng.randf() * 0.08, 0.62 + rng.randf() * 0.06, 0.44 + rng.randf() * 0.04)
-											map_image.set_pixel(tx + px, ty + py, sand_col)
-							elif dy == 1:  # Voisin en bas
-								for px in range(TILE_SIZE):
-									for py in range(TILE_SIZE - beach_w, TILE_SIZE):
-										var alpha: float = (py - (TILE_SIZE - beach_w)) / float(beach_w)
-										if rng.randf() < alpha * 0.6:
-											var sand_col: Color = Color(0.72 + rng.randf() * 0.08, 0.62 + rng.randf() * 0.06, 0.44 + rng.randf() * 0.04)
-											map_image.set_pixel(tx + px, ty + py, sand_col)
+			if _terrain_grid[x][y] != 2:
+				continue
+			var tx: int = x * TILE_SIZE
+			var ty: int = y * TILE_SIZE
+			for dx in range(-1, 2):
+				for dy in range(-1, 2):
+					if dx == 0 and dy == 0:
+						continue
+					var nx: int = x + dx
+					var ny: int = y + dy
+					if nx < 0 or nx >= w or ny < 0 or ny >= h or _terrain_grid[nx][ny] == 2:
+						continue
+					var beach_w: int = 10
+					var sand_base: Color = Color(0.72, 0.62, 0.44)
+					if dx == -1:
+						for px in range(beach_w):
+							var alpha: float = 1.0 - (px / float(beach_w))
+							for py in range(TILE_SIZE):
+								if rng.randf() < alpha * 0.5:
+									map_image.set_pixel(tx + px, ty + py, sand_base)
+					elif dx == 1:
+						for px in range(TILE_SIZE - beach_w, TILE_SIZE):
+							var alpha: float = (px - (TILE_SIZE - beach_w)) / float(beach_w)
+							for py in range(TILE_SIZE):
+								if rng.randf() < alpha * 0.5:
+									map_image.set_pixel(tx + px, ty + py, sand_base)
+					if dy == -1:
+						for py in range(beach_w):
+							var alpha: float = 1.0 - (py / float(beach_w))
+							for px in range(TILE_SIZE):
+								if rng.randf() < alpha * 0.5:
+									map_image.set_pixel(tx + px, ty + py, sand_base)
+					elif dy == 1:
+						for py in range(TILE_SIZE - beach_w, TILE_SIZE):
+							var alpha: float = (py - (TILE_SIZE - beach_w)) / float(beach_w)
+							for px in range(TILE_SIZE):
+								if rng.randf() < alpha * 0.5:
+									map_image.set_pixel(tx + px, ty + py, sand_base)
 	
 	await get_tree().process_frame
 
 	# === DÉTAILS DE SOL (hautes herbes, buissons, souches) ===
 	for x in range(w):
 		for y in range(h):
-			if _terrain_grid[x][y] == 0 or _terrain_grid[x][y] == 5:  # Herbe uniquement
-				var tx: int = x * TILE_SIZE
-				var ty: int = y * TILE_SIZE
-				
-				# Hautes herbes (touffes vert foncé)
-				for _i in range(rng.randi_range(0, 3)):
-					var hx: int = tx + rng.randi_range(4, TILE_SIZE - 8)
-					var hy: int = ty + rng.randi_range(4, TILE_SIZE - 8)
-					for dy in range(rng.randi_range(2, 4)):
-						for dx in range(rng.randi_range(2, 3)):
-							map_image.set_pixel(hx + dx, hy + dy, Color(0.18, 0.40, 0.10, 0.9))
-				
-				# Souches d'arbres
-				if rng.randf() < 0.05:
-					var sx: int = tx + rng.randi_range(12, TILE_SIZE - 16)
-					var sy: int = ty + rng.randi_range(12, TILE_SIZE - 16)
-					for dy in range(3):
-						for dx in range(4):
-							map_image.set_pixel(sx + dx, sy + dy, Color(0.38, 0.24, 0.12))
-					# Anneaux de croissance
-					map_image.set_pixel(sx + 1, sy + 1, Color(0.50, 0.35, 0.18))
-					map_image.set_pixel(sx + 2, sy + 1, Color(0.50, 0.35, 0.18))
-					map_image.set_pixel(sx + 1, sy + 2, Color(0.42, 0.28, 0.14))
-					map_image.set_pixel(sx + 2, sy + 2, Color(0.42, 0.28, 0.14))
-				
-				# Petits buissons
-				if rng.randf() < 0.08:
-					var bx: int = tx + rng.randi_range(8, TILE_SIZE - 12)
-					var by: int = ty + rng.randi_range(8, TILE_SIZE - 12)
-					for dy in range(-2, 3):
-						for dx in range(-2, 3):
-							if dx*dx + dy*dy <= 5 and rng.randf() < 0.7:
-								var bcol: Color = Color(0.20, 0.44, 0.12) if rng.randf() < 0.5 else Color(0.26, 0.50, 0.16)
-								map_image.set_pixel(bx + dx, by + dy, bcol)
-				
-				# Fleurs colorées (plus nombreuses)
-				if rng.randf() < 0.35:
-					for _j in range(rng.randi_range(2, 5)):
-						var fx: int = tx + rng.randi_range(8, TILE_SIZE - 12)
-						var fy: int = ty + rng.randi_range(8, TILE_SIZE - 12)
-						var flower_type: float = rng.randf()
-						var fcol: Color = Color(0.85, 0.20, 0.20)  # Rouge
-						if flower_type < 0.33:
-							fcol = Color(0.85, 0.78, 0.20)  # Jaune
-						elif flower_type < 0.66:
-							fcol = Color(0.72, 0.55, 0.82)  # Violet
-						else:
-							fcol = Color(0.20, 0.60, 0.85)  # Bleu
-						map_image.set_pixel(fx, fy, fcol)
-						map_image.set_pixel(fx + 1, fy, fcol)
-						map_image.set_pixel(fx, fy + 1, Color(0.20, 0.42, 0.12))
-				
-				# Cailloux sur l'herbe
-				if rng.randf() < 0.25:
-					for _j in range(rng.randi_range(2, 4)):
-						var cx: int = tx + rng.randi_range(4, TILE_SIZE - 6)
-						var cy: int = ty + rng.randi_range(4, TILE_SIZE - 6)
-						var ccol: Color = Color(0.55, 0.52, 0.48)
-						if rng.randf() < 0.5:
-							ccol = Color(0.60, 0.58, 0.52)
-						map_image.set_pixel(cx, cy, ccol)
-						if rng.randf() < 0.5:
-							map_image.set_pixel(cx + 1, cy, ccol)
+			if _terrain_grid[x][y] != 0 and _terrain_grid[x][y] != 5:
+				continue
+			var tx: int = x * TILE_SIZE
+			var ty: int = y * TILE_SIZE
+
+			for _i in range(rng.randi_range(0, 2)):
+				var hx: int = tx + rng.randi_range(4, TILE_SIZE - 8)
+				var hy: int = ty + rng.randi_range(4, TILE_SIZE - 8)
+				for dy in range(rng.randi_range(2, 3)):
+					for dx in range(rng.randi_range(2, 3)):
+						map_image.set_pixel(hx + dx, hy + dy, Color(0.18, 0.40, 0.10, 0.9))
+
+			if rng.randf() < 0.04:
+				var sx: int = tx + rng.randi_range(12, TILE_SIZE - 16)
+				var sy: int = ty + rng.randi_range(12, TILE_SIZE - 16)
+				for dy in range(3):
+					for dx in range(4):
+						map_image.set_pixel(sx + dx, sy + dy, Color(0.38, 0.24, 0.12))
+				map_image.set_pixel(sx + 1, sy + 1, Color(0.50, 0.35, 0.18))
+				map_image.set_pixel(sx + 2, sy + 1, Color(0.50, 0.35, 0.18))
+				map_image.set_pixel(sx + 1, sy + 2, Color(0.42, 0.28, 0.14))
+				map_image.set_pixel(sx + 2, sy + 2, Color(0.42, 0.28, 0.14))
+
+			if rng.randf() < 0.06:
+				var bx: int = tx + rng.randi_range(8, TILE_SIZE - 12)
+				var by: int = ty + rng.randi_range(8, TILE_SIZE - 12)
+				for dy in range(-2, 3):
+					for dx in range(-2, 3):
+						if dx*dx + dy*dy <= 5 and rng.randf() < 0.7:
+							map_image.set_pixel(bx + dx, by + dy, Color(0.20, 0.44, 0.12) if rng.randf() < 0.5 else Color(0.26, 0.50, 0.16))
+
+			if rng.randf() < 0.25:
+				for _j in range(rng.randi_range(2, 4)):
+					var fx: int = tx + rng.randi_range(8, TILE_SIZE - 12)
+					var fy: int = ty + rng.randi_range(8, TILE_SIZE - 12)
+					var fcol: Color = Color(0.85, 0.20, 0.20)
+					var flower_type: float = rng.randf()
+					if flower_type < 0.33:
+						fcol = Color(0.85, 0.78, 0.20)
+					elif flower_type < 0.66:
+						fcol = Color(0.72, 0.55, 0.82)
+					else:
+						fcol = Color(0.20, 0.60, 0.85)
+					map_image.set_pixel(fx, fy, fcol)
+					map_image.set_pixel(fx + 1, fy, fcol)
+					map_image.set_pixel(fx, fy + 1, Color(0.20, 0.42, 0.12))
+
+			if rng.randf() < 0.15:
+				for _j in range(rng.randi_range(2, 3)):
+					var cx: int = tx + rng.randi_range(4, TILE_SIZE - 6)
+					var cy: int = ty + rng.randi_range(4, TILE_SIZE - 6)
+					map_image.set_pixel(cx, cy, Color(0.55, 0.52, 0.48))
 	
 	await get_tree().process_frame
 	
@@ -817,8 +768,6 @@ func _generate_map_image() -> ImageTexture:
 
 func _create_decorations() -> void:
 	# Créer des arbres et rochers sur la carte pour la rendre plus vivante
-
-	rng.randomize()
 	
 	# === NOUVEAU SYSTÈME ARBRES : images individuelles avec 2 arbres par image ===
 	# Chaque image fait 224x128 → 2 arbres de 112x128 chacun
@@ -1107,8 +1056,6 @@ func _create_building_shadow(parent: Node2D, width: float, height: float, alpha:
 
 func _create_japanese_decorations() -> void:
 	"""Crée des éléments décoratifs japonais : torii, cerisiers, lanternes, temples"""
-
-	rng.randomize()
 	
 	# Charger le sprite sheet de bâtiments japonais
 	var japanese_sheet: Texture2D = load("res://assets/bat.png")
@@ -1396,8 +1343,6 @@ func _create_japanese_decorations() -> void:
 
 func _create_cherry_blossom_particles() -> void:
 	"""Crée des particules de pétales de cerisier qui tombent - version améliorée"""
-
-	rng.randomize()
 	var view_w := _world_w * TILE_SIZE
 	var view_h := _world_h * TILE_SIZE
 	
@@ -1430,8 +1375,6 @@ func _create_cherry_blossom_particles() -> void:
 
 func _create_fireflies() -> void:
 	"""Crée des lucioles près des bâtiments et villes pour l'ambiance"""
-
-	rng.randomize()
 	var firefly_positions: Array = []
 	for b in _japanese_buildings:
 		firefly_positions.append(b.position)
@@ -1482,8 +1425,6 @@ func _create_mountain_sprites() -> void:
 	# Créer des sprites de montagnes sur les tuiles montagne (type 3)
 	# Les montagnes débordent sur les tuiles voisines pour un effet imposant
 
-	rng.randomize()
-	
 	# Collecter toutes les positions montagne
 	var mountain_positions: Array[Vector2] = []
 	for x in range(_zone_w):
@@ -1562,8 +1503,6 @@ func _create_mountain_sprites() -> void:
 func _create_bridges() -> void:
 	# Détecter où les routes (type 1) croisent l'eau (type 2) et placer des ponts
 
-	rng.randomize()
-	
 	for x in range(1, _zone_w - 1):
 		for y in range(1, _zone_h - 1):
 			if _terrain_grid[x][y] == 2:  # Eau
@@ -1577,7 +1516,8 @@ func _create_bridges() -> void:
 				var world_y: float = (y * TILE_SIZE) + TILE_SIZE / 2
 				
 				if has_left_road and has_right_road:
-					# Pont horizontal
+					# Pont horizontal — rendre la tuile praticable
+					_terrain_grid[x][y] = 1
 					var bridge_node: Node2D = Node2D.new()
 					bridge_node.name = "Bridge_H_" + str(x) + "_" + str(y)
 					bridge_node.position = Vector2(world_x, world_y)
@@ -1613,7 +1553,8 @@ func _create_bridges() -> void:
 					_decorations.append(bridge_node)
 				
 				elif has_top_road and has_bottom_road:
-					# Pont vertical
+					# Pont vertical — rendre la tuile praticable
+					_terrain_grid[x][y] = 1
 					var bridge_node: Node2D = Node2D.new()
 					bridge_node.name = "Bridge_V_" + str(x) + "_" + str(y)
 					bridge_node.position = Vector2(world_x, world_y)
@@ -1665,17 +1606,16 @@ func _generate_sky_image() -> Image:
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
 	var top := Color(0.15, 0.22, 0.40)
 	var bottom := Color(0.55, 0.70, 0.85)
-	for y in range(h):
+	var strip_h := 16
+	for y in range(0, h, strip_h):
 		var t := float(y) / float(h)
 		var c := top.lerp(bottom, t)
-		img.fill_rect(Rect2i(0, y, w, 1), c)
+		img.fill_rect(Rect2i(0, y, w, min(strip_h, h - y)), c)
 	return img
 
 func _create_treasures() -> void:
 	# Créer des coffres au trésor contenant des récompenses
 
-	rng.randomize()
-	
 	for i in range(TREASURE_COUNT):
 		var chest_x: int = rng.randi_range(1, _zone_w - 2)
 		var chest_y: int = rng.randi_range(1, _zone_h - 2)
@@ -2686,7 +2626,7 @@ func _update_fog_of_war() -> void:
 				changed_tiles.append(Vector2i(x, y))
 	
 	if newly_discovered > 0:
-		var discover_xp: int = mini(newly_discovered * XP_DISCOVER_TILE, 30)
+		var discover_xp: int = min(newly_discovered * XP_DISCOVER_TILE, 30)
 		_gain_xp(discover_xp)
 	
 	_refresh_fog_tiles(changed_tiles)
@@ -2699,8 +2639,6 @@ func _init_enemy_armies() -> void:
 	"""Initialise les armées des ennemis errants uniquement (les boss ont leurs propres armées)"""
 	_enemy_armies = []
 
-	rng.randomize()
-	
 	for i in range(_enemies.size()):
 		var army: Array = []
 		var army_size: int = rng.randi_range(1, 2)
@@ -2946,6 +2884,7 @@ func _zoom_in() -> void:
 	new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
 	_camera.zoom = Vector2(new_zoom, new_zoom)
 	_clamp_camera_to_map()
+	_update_minimap()
 
 func _zoom_out() -> void:
 	if not _camera:
@@ -2954,6 +2893,7 @@ func _zoom_out() -> void:
 	new_zoom = clamp(new_zoom, _camera_zoom_min, ZOOM_MAX)
 	_camera.zoom = Vector2(new_zoom, new_zoom)
 	_clamp_camera_to_map()
+	_update_minimap()
 
 func _check_enemy_encounter() -> void:
 	# Vérifier si le héros est proche d'un ennemi
@@ -3603,7 +3543,7 @@ func _create_town_overlay() -> void:
 	_town_overlay.name = "TownOverlay"
 	_town_overlay.visible = false
 	_town_overlay.set_anchors_preset(Control.PRESET_CENTER)
-	_town_overlay.custom_minimum_size = Vector2(mini(580, int(_get_viewport_size().x * 0.9)), mini(800, int(_get_viewport_size().y * 0.85)))
+	_town_overlay.custom_minimum_size = Vector2(min(580, int(_get_viewport_size().x * 0.9)), min(800, int(_get_viewport_size().y * 0.85)))
 	var jap_theme := JapaneseUITheme.new()
 	_town_overlay.add_theme_stylebox_override("panel", JapaneseUITheme.panel_style(12))
 	add_child(_town_overlay)
@@ -3736,7 +3676,7 @@ func _create_merchant_overlay() -> void:
 	_merchant_overlay = Panel.new()
 	_merchant_overlay.name = "MerchantOverlay"
 	_merchant_overlay.visible = false
-	var overlay_size := Vector2(mini(520, int(_get_viewport_size().x * 0.88)), mini(640, int(_get_viewport_size().y * 0.78)))
+	var overlay_size := Vector2(min(520, int(_get_viewport_size().x * 0.88)), min(640, int(_get_viewport_size().y * 0.78)))
 	var vp_size := _get_viewport_size()
 	_merchant_overlay.position = Vector2((vp_size.x - overlay_size.x) / 2, 190)
 	_merchant_overlay.size = overlay_size
@@ -3909,7 +3849,7 @@ func _buy_merchant_item(item_key: String) -> void:
 		"spell_fire":
 			msg = "🔥 Sort de feu acquis !"
 		"spell_heal":
-			_hero_hp = mini(_hero_hp + item.value, _hero_max_hp)
+			_hero_hp = min(_hero_hp + item.value, _hero_max_hp)
 			msg = "Soin +%d PV !" % item.value
 			if _active_hero_index >= 0 and _active_hero_index < _heroes_data.size():
 				_heroes_data[_active_hero_index]["hp"] = _hero_hp
@@ -4064,15 +4004,15 @@ func _on_end_turn_pressed() -> void:
 
 # Variables pour la minimap
 var _minimap_panel: Control = null
-var _minimap_hero_dot: ColorRect = null
+var _minimap_hero_dot: TextureRect = null
+var _minimap_hero_glow: TextureRect = null
 var _minimap_bg: TextureRect = null
+var _minimap_viewport_rect: Panel = null
 var _minimap_city_dots: Array = []
 var _minimap_enemy_dots: Array = []
 var _minimap_boss_dots: Array = []
 var _minimap_resource_dots: Array = []
 var _minimap_treasure_dots: Array = []
-const MINIMAP_SIZE: int = 200
-const MINIMAP_SCALE: float = 10.0  # Échelle pour convertir la position du héros en coordonnées minimap
 
 # Zoom : min = carte pleine écran ; défaut = plus serré (pas de bande verte)
 const ZOOM_MAX: float = 2.0
@@ -4210,6 +4150,11 @@ var _merchant_items_container: VBoxContainer = null
 var _merchant_screen_open: bool = false
 var _selected_merchant_index: int = -1
 var _last_merchant_visit_index: int = -1
+
+# Détails du héros
+var _hero_details_overlay = null
+var _hero_details_layer = null
+var _hero_details_visible: bool = false
 
 # Inventaire / effets du joueur
 var _player_items: Array = []  # [{item_id: String, effect: String, value: int}]
@@ -4466,7 +4411,7 @@ func _update_quest_panel() -> void:
 			continue
 		var done: bool = q["id"] in _quest_completed
 		var cur: int = _quest_progress.get(q["id"], 0)
-		var status: String = "%s: %d/%d" % [q["title"], mini(cur, q["target"]), q["target"]]
+		var status: String = "%s: %d/%d" % [q["title"], min(cur, q["target"]), q["target"]]
 		if done:
 			label.add_theme_color_override("font_color", Color(0.4, 0.8, 0.4))
 			status += " ✓"
@@ -4603,8 +4548,6 @@ func _create_cities() -> void:
 func _create_enemies() -> void:
 	# Créer des ennemis errants sur la carte (non-boss)
 
-	rng.randomize()
-	
 	for i in range(WANDERER_COUNT):
 		var enemy_x: int = rng.randi_range(3, _zone_w - 4)
 		var enemy_y: int = rng.randi_range(3, _zone_h - 4)
@@ -4767,7 +4710,6 @@ func _create_bosses() -> void:
 		print("Boss créé : ", boss_def["name"], " à ", boss_pos)
 
 func _create_merchants() -> void:
-	rng.randomize()
 	var merchant_names: Array[String] = ["Yamada le marchand", "Fujiwara l'antiquaire", "Takashi le colporteur", "Tanaka l'alchimiste"]
 
 	for i in range(MERCHANT_COUNT):
@@ -4842,8 +4784,6 @@ func _reveal_fog_around_pos(tile: Vector2i, radius: int) -> void:
 func _create_resources() -> void:
 	# Créer des ressources à collecter sur la carte (mines, scieries)
 
-	rng.randomize()
-	
 	for i in range(RESOURCE_COUNT):
 		var res_x: int = rng.randi_range(1, _zone_w - 2)
 		var res_y: int = rng.randi_range(1, _zone_h - 2)
@@ -4910,6 +4850,19 @@ func _create_resources() -> void:
 		
 		print("Ressource ", i + 1, " créée : ", res_name, " à la position : ", res_pos)
 
+func _create_circle_tex(radius: int) -> ImageTexture:
+	var diameter = radius * 2 + 1
+	var img = Image.create(diameter, diameter, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var r2 = radius * radius
+	for x in range(diameter):
+		for y in range(diameter):
+			var dx = x - radius
+			var dy = y - radius
+			if dx * dx + dy * dy <= r2:
+				img.set_pixel(x, y, Color.WHITE)
+	return ImageTexture.create_from_image(img)
+
 func _create_minimap() -> void:
 	if _hud == null:
 		return
@@ -4917,160 +4870,251 @@ func _create_minimap() -> void:
 	if minimap_container == null:
 		return
 
+	const ZONE_W = 540
+	const ZONE_H = 380
+
+	# ── Terrain zone ──
 	_minimap_panel = Control.new()
 	_minimap_panel.name = "MinimapZone"
-	_minimap_panel.size = Vector2(194, 130)
-	_minimap_panel.position = Vector2(3, 3)
+	_minimap_panel.size = Vector2(ZONE_W, ZONE_H)
+	_minimap_panel.position = Vector2(10, 10)
+	_minimap_panel.clip_contents = true
 	minimap_container.add_child(_minimap_panel)
 
-	var scale_mini: float = min(194.0 / float(_zone_w * TILE_SIZE), 130.0 / float(_zone_h * TILE_SIZE))
+	var scale_mini = min(ZONE_W / float(_zone_w * TILE_SIZE), ZONE_H / float(_zone_h * TILE_SIZE))
 
-	# Terrain background
-	var bg_img: Image = Image.create(194, 130, false, Image.FORMAT_RGBA8)
-	bg_img.fill(Color(0.05, 0.05, 0.08))
-	var terrain_colors: Dictionary = {
-		0: Color(0.25, 0.50, 0.20),  # grass
-		1: Color(0.50, 0.40, 0.25),  # dirt
-		2: Color(0.15, 0.25, 0.50),  # water
-		3: Color(0.35, 0.30, 0.20),  # swamp
-		4: Color(0.45, 0.35, 0.25),  # desert
-		5: Color(0.55, 0.50, 0.45),  # mountain
+	# ── Terrain background ──
+	var bg_img = Image.create(ZONE_W, ZONE_H, false, Image.FORMAT_RGBA8)
+	bg_img.fill(Color(0.04, 0.04, 0.06))
+	var terrain_colors = {
+		0: Color(0.28, 0.55, 0.22),
+		1: Color(0.55, 0.42, 0.25),
+		2: Color(0.10, 0.20, 0.55),
+		3: Color(0.35, 0.28, 0.18),
+		4: Color(0.50, 0.38, 0.25),
+		5: Color(0.50, 0.45, 0.38),
 	}
 	for tx in range(_zone_w):
 		for ty in range(_zone_h):
-			var terrain: int = _terrain_grid[tx][ty] if tx < _terrain_grid.size() and ty < _terrain_grid[tx].size() else 0
-			var color: Color = terrain_colors.get(terrain, Color(0.2, 0.4, 0.2))
-			var px: float = tx * TILE_SIZE * scale_mini
-			var py: float = ty * TILE_SIZE * scale_mini
-			var ps: float = maxf(1.0, TILE_SIZE * scale_mini - 0.5)
-			var rect := Rect2i(int(px), int(py), int(ps), int(ps))
-			if rect.position.x >= 0 and rect.position.y >= 0 and rect.end.x <= 194 and rect.end.y <= 130:
+			var terrain = _terrain_grid[tx][ty] if tx < _terrain_grid.size() and ty < _terrain_grid[tx].size() else 0
+			var color = terrain_colors.get(terrain, Color(0.2, 0.4, 0.2))
+			var px = tx * TILE_SIZE * scale_mini
+			var py = ty * TILE_SIZE * scale_mini
+			var ps = maxf(1.0, TILE_SIZE * scale_mini - 0.5)
+			var rect = Rect2i(int(px), int(py), int(ps), int(ps))
+			if rect.position.x >= 0 and rect.position.y >= 0 and rect.end.x <= ZONE_W and rect.end.y <= ZONE_H:
 				bg_img.fill_rect(rect, color)
 	_minimap_bg = TextureRect.new()
 	_minimap_bg.texture = ImageTexture.create_from_image(bg_img)
-	_minimap_bg.size = Vector2(194, 130)
+	_minimap_bg.size = Vector2(ZONE_W, ZONE_H)
 	_minimap_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_minimap_panel.add_child(_minimap_bg)
 
-	# Fog overlay on minimap
-	var fog_img: Image = Image.create(194, 130, false, Image.FORMAT_RGBA8)
+	# ── Fog overlay (plus clair) ──
+	var fog_img = Image.create(ZONE_W, ZONE_H, false, Image.FORMAT_RGBA8)
 	fog_img.fill(Color(0, 0, 0, 0))
 	if _fog_grid.size() > 0:
 		for tx in range(_zone_w):
 			for ty in range(_zone_h):
-				var state: int = _fog_grid[tx][ty] if tx < _fog_grid.size() and ty < _fog_grid[tx].size() else 0
-				var fog_alpha: float = 0.0 if state == 2 else (0.4 if state == 1 else 0.8)
+				var state = _fog_grid[tx][ty] if tx < _fog_grid.size() and ty < _fog_grid[tx].size() else 0
+				var fog_alpha = 0.0 if state == 2 else (0.25 if state == 1 else 0.60)
 				if fog_alpha > 0:
-					var px: float = tx * TILE_SIZE * scale_mini
-					var py: float = ty * TILE_SIZE * scale_mini
-					var ps: float = maxf(1.0, TILE_SIZE * scale_mini - 0.5)
-					var rect := Rect2i(int(px), int(py), int(ps), int(ps))
-					if rect.position.x >= 0 and rect.position.y >= 0 and rect.end.x <= 194 and rect.end.y <= 130:
-						fog_img.fill_rect(rect, Color(0.02, 0.02, 0.05, fog_alpha))
-	var fog_rect: TextureRect = TextureRect.new()
+					var px = tx * TILE_SIZE * scale_mini
+					var py = ty * TILE_SIZE * scale_mini
+					var ps = maxf(1.0, TILE_SIZE * scale_mini - 0.5)
+					var rect = Rect2i(int(px), int(py), int(ps), int(ps))
+					if rect.position.x >= 0 and rect.position.y >= 0 and rect.end.x <= ZONE_W and rect.end.y <= ZONE_H:
+						fog_img.fill_rect(rect, Color(0.04, 0.04, 0.08, fog_alpha))
+	var fog_rect = TextureRect.new()
 	fog_rect.texture = ImageTexture.create_from_image(fog_img)
-	fog_rect.size = Vector2(194, 130)
+	fog_rect.size = Vector2(ZONE_W, ZONE_H)
 	fog_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_minimap_panel.add_child(fog_rect)
 
-	# City dots
+	# ── Pre-generated circle textures ──
+	var c3  = _create_circle_tex(3)
+	var c4  = _create_circle_tex(4)
+	var c5  = _create_circle_tex(5)
+	var c6  = _create_circle_tex(6)
+	var c8  = _create_circle_tex(8)
+	var c10 = _create_circle_tex(10)
+
+	# ── City dots ──
 	_minimap_city_dots = []
 	for i in range(_cities.size()):
-		var city_pos: Vector2 = _cities[i]
-		var is_main: bool = (i == 0)
-		var dot_size: float = 10.0 if is_main else 8.0
-		var dot: ColorRect = ColorRect.new()
-		dot.size = Vector2(dot_size, dot_size)
-		dot.color = Color(1, 0.85, 0.2) if is_main else Color(1, 0.3, 0.1)
-		dot.position = Vector2(city_pos.x * scale_mini - dot_size * 0.5, city_pos.y * scale_mini - dot_size * 0.5)
+		var city_pos = _cities[i]
+		var is_main = (i == 0)
+		var dot = TextureRect.new()
+		dot.texture = c5
+		dot.size = Vector2(13, 13)
+		dot.modulate = Color(1.0, 0.8, 0.1) if is_main else Color(0.9, 0.45, 0.1)
+		dot.position = Vector2(city_pos.x * scale_mini - 6.5, city_pos.y * scale_mini - 6.5)
 		_minimap_panel.add_child(dot)
-		var border: ColorRect = ColorRect.new()
-		border.size = Vector2(dot_size + 2, dot_size + 2)
-		border.position = Vector2(-1, -1)
-		border.color = Color(1, 1, 1, 0.6) if is_main else Color(0.8, 0.8, 0.8, 0.4)
-		dot.add_child(border)
+		if i < _cities_data.size():
+			var label = Label.new()
+			label.text = _cities_data[i].get("name", "Ville")
+			label.add_theme_font_size_override("font_size", 8)
+			label.add_theme_color_override("font_color", Color(1, 1, 0.85, 0.85))
+			label.position = Vector2(city_pos.x * scale_mini + 7, city_pos.y * scale_mini - 4)
+			_minimap_panel.add_child(label)
 		_minimap_city_dots.append(dot)
 
-	# Enemy dots
+	# ── Enemy dots ──
 	_minimap_enemy_dots = []
 	for enemy in _enemies:
-		var dot: ColorRect = ColorRect.new()
-		dot.size = Vector2(6, 6)
-		dot.color = Color(0.8, 0, 0.8)
-		dot.position = Vector2(enemy["position"].x * scale_mini - 3, enemy["position"].y * scale_mini - 3)
+		var dot = TextureRect.new()
+		dot.texture = c3
+		dot.size = Vector2(9, 9)
+		dot.modulate = Color(0.6, 0.1, 0.8)
+		dot.position = Vector2(enemy["position"].x * scale_mini - 4.5, enemy["position"].y * scale_mini - 4.5)
 		_minimap_panel.add_child(dot)
 		_minimap_enemy_dots.append(dot)
 
-	# Boss dots
+	# ── Boss dots ──
 	_minimap_boss_dots = []
 	for boss_data in _bosses:
-		var dot: ColorRect = ColorRect.new()
-		dot.size = Vector2(10, 10)
-		dot.color = Color(0.9, 0.1, 0.1)
-		dot.position = Vector2(boss_data["position"].x * scale_mini - 5, boss_data["position"].y * scale_mini - 5)
+		var dot = TextureRect.new()
+		dot.texture = c6
+		dot.size = Vector2(15, 15)
+		dot.modulate = Color(0.95, 0.1, 0.1)
+		dot.position = Vector2(boss_data["position"].x * scale_mini - 7.5, boss_data["position"].y * scale_mini - 7.5)
 		_minimap_panel.add_child(dot)
-		var border: ColorRect = ColorRect.new()
-		border.size = Vector2(12, 12)
-		border.position = Vector2(-1, -1)
-		border.color = Color(1, 0.6, 0.2, 0.8)
-		dot.add_child(border)
+		var glow = TextureRect.new()
+		glow.texture = c8
+		glow.size = Vector2(19, 19)
+		glow.position = Vector2(-2, -2)
+		glow.modulate = Color(1, 0.3, 0.1, 0.25)
+		dot.add_child(glow)
 		_minimap_boss_dots.append(dot)
 
-	# Resource dots
+	# ── Resource dots ──
 	_minimap_resource_dots = []
 	for res in _resources:
-		var dot: ColorRect = ColorRect.new()
-		dot.size = Vector2(5, 5)
-		dot.color = Color(1, 0.8, 0)
-		dot.position = Vector2(res["position"].x * scale_mini - 2.5, res["position"].y * scale_mini - 2.5)
+		var dot = TextureRect.new()
+		dot.texture = c3
+		dot.size = Vector2(7, 7)
+		dot.modulate = Color(1, 0.85, 0.15)
+		dot.position = Vector2(res["position"].x * scale_mini - 3.5, res["position"].y * scale_mini - 3.5)
 		_minimap_panel.add_child(dot)
 		_minimap_resource_dots.append(dot)
 
-	# Treasure dots
+	# ── Treasure dots ──
 	_minimap_treasure_dots = []
 	for chest in _treasures:
-		var dot: ColorRect = ColorRect.new()
-		dot.size = Vector2(6, 6)
-		dot.color = Color(1, 1, 1)
-		dot.position = Vector2(chest["position"].x * scale_mini - 3, chest["position"].y * scale_mini - 3)
+		var dot = TextureRect.new()
+		dot.texture = c4
+		dot.size = Vector2(9, 9)
+		dot.modulate = Color(0.7, 0.9, 1.0)
+		dot.position = Vector2(chest["position"].x * scale_mini - 4.5, chest["position"].y * scale_mini - 4.5)
 		_minimap_panel.add_child(dot)
 		_minimap_treasure_dots.append(dot)
 
-	# Hero dot with glow
-	var hero_pos: Vector2 = _hero.position if _hero else Vector2(
+	# ── Viewport rectangle (shows camera visible area) ──
+	_minimap_viewport_rect = Panel.new()
+	var vp_style = StyleBoxFlat.new()
+	vp_style.bg_color = Color(1, 1, 1, 0.06)
+	vp_style.border_color = Color(0.8, 0.9, 1.0, 0.5)
+	vp_style.border_width_top = 1
+	vp_style.border_width_bottom = 1
+	vp_style.border_width_left = 1
+	vp_style.border_width_right = 1
+	_minimap_viewport_rect.add_theme_stylebox_override("panel", vp_style)
+	_minimap_viewport_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_minimap_panel.add_child(_minimap_viewport_rect)
+
+	# ── Hero dot with animated glow ──
+	var hero_pos = _hero.position if _hero else Vector2(
 		(_zone_w / 2.0) * TILE_SIZE + TILE_SIZE / 2.0,
 		(_zone_h / 2.0) * TILE_SIZE + TILE_SIZE / 2.0
 	)
-	_minimap_hero_dot = ColorRect.new()
-	_minimap_hero_dot.size = Vector2(10, 10)
-	_minimap_hero_dot.color = Color(0, 0.5, 1)
-	_minimap_hero_dot.position = Vector2(hero_pos.x * scale_mini - 5, hero_pos.y * scale_mini - 5)
+	_minimap_hero_dot = TextureRect.new()
+	_minimap_hero_dot.texture = c6
+	_minimap_hero_dot.size = Vector2(15, 15)
+	_minimap_hero_dot.modulate = Color(0.2, 0.6, 1.0)
+	_minimap_hero_dot.position = Vector2(hero_pos.x * scale_mini - 7.5, hero_pos.y * scale_mini - 7.5)
+	_minimap_hero_dot.z_index = 10
 	_minimap_panel.add_child(_minimap_hero_dot)
 
-	var hero_border: ColorRect = ColorRect.new()
-	hero_border.size = Vector2(12, 12)
-	hero_border.position = Vector2(-1, -1)
-	hero_border.color = Color(1, 1, 1)
-	_minimap_hero_dot.add_child(hero_border)
+	_minimap_hero_glow = TextureRect.new()
+	_minimap_hero_glow.texture = c10
+	_minimap_hero_glow.size = Vector2(25, 25)
+	_minimap_hero_glow.position = Vector2(-5, -5)
+	_minimap_hero_glow.modulate = Color(0.3, 0.7, 1.0, 0.3)
+	_minimap_hero_dot.add_child(_minimap_hero_glow)
+	var pulse = create_tween().set_loops()
+	pulse.tween_property(_minimap_hero_glow, "modulate:a", 0.6, 1.0)
+	pulse.tween_property(_minimap_hero_glow, "modulate:a", 0.2, 1.0)
 
-	var hero_glow_dot: ColorRect = ColorRect.new()
-	hero_glow_dot.name = "HeroGlowDot"
-	hero_glow_dot.size = Vector2(16, 16)
-	hero_glow_dot.position = Vector2(-3, -3)
-	hero_glow_dot.color = Color(0.3, 0.7, 1.0, 0.3)
-	_minimap_hero_dot.add_child(hero_glow_dot)
+	# ── Click-to-navigate (moves camera) ──
+	_minimap_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_minimap_panel.gui_input.connect(_on_minimap_click)
 
 	_minimap_scale = scale_mini
+
+	# ═══════════════════════════════════════════
+	#  LÉGENDE
+	# ═══════════════════════════════════════════
+
+	var leg_y = ZONE_H + 18
+	var leg_x = 14
+	var leg_items = [
+		{ "tex": c5, "size": 9, "color": Color(1.0, 0.8, 0.1), "label": "Ville" },
+		{ "tex": c3, "size": 8, "color": Color(0.6, 0.1, 0.8), "label": "Ennemi" },
+		{ "tex": c6, "size": 10, "color": Color(0.95, 0.1, 0.1), "label": "Boss" },
+		{ "tex": c3, "size": 7, "color": Color(1, 0.85, 0.15), "label": "Ressource" },
+		{ "tex": c4, "size": 8, "color": Color(0.7, 0.9, 1.0), "label": "Trésor" },
+		{ "tex": c6, "size": 10, "color": Color(0.2, 0.6, 1.0), "label": "Héros" },
+	]
+	var leg_spacing = 86
+	var leg_start_x = leg_x
+	for item in leg_items:
+		var dot = TextureRect.new()
+		dot.texture = item["tex"]
+		dot.size = Vector2(item["size"], item["size"])
+		dot.modulate = item["color"]
+		dot.position = Vector2(leg_start_x, leg_y)
+		minimap_container.add_child(dot)
+		var lbl = Label.new()
+		lbl.text = item["label"]
+		lbl.add_theme_font_size_override("font_size", 9)
+		lbl.add_theme_color_override("font_color", Color(0.85, 0.82, 0.75))
+		lbl.position = Vector2(leg_start_x + item["size"] + 4, leg_y - 1)
+		minimap_container.add_child(lbl)
+		leg_start_x += leg_spacing
+		if leg_start_x + leg_spacing > 560:
+			leg_start_x = leg_x
+			leg_y += 22
+
 	if DEBUG_LOG:
-		print("✓ Minimap créée")
+		print("✓ Minimap créée (", ZONE_W, "×", ZONE_H, ") + légende")
+
+func _on_minimap_click(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var local_pos = _minimap_panel.get_local_mouse_position()
+		var world_x = local_pos.x / _minimap_scale
+		var world_y = local_pos.y / _minimap_scale
+		world_x = clampf(world_x, 0, _zone_w * TILE_SIZE)
+		world_y = clampf(world_y, 0, _zone_h * TILE_SIZE)
+		if _camera != null:
+			_camera.position = Vector2(world_x, world_y)
+			_update_minimap()
 
 func _update_minimap() -> void:
-	if _minimap_hero_dot == null or _hero == null:
+	if _minimap_hero_dot == null or _hero == null or _camera == null:
 		return
+	var s = _minimap_scale
 	_minimap_hero_dot.position = Vector2(
-		_hero.position.x * _minimap_scale - 5.0,
-		_hero.position.y * _minimap_scale - 5.0
+		_hero.position.x * s - 7.5,
+		_hero.position.y * s - 7.5
 	)
+	if _minimap_viewport_rect != null:
+		var view_size = get_viewport_rect().size / _camera.zoom
+		var vp_x = (_camera.position.x - view_size.x * 0.5) * s
+		var vp_y = (_camera.position.y - view_size.y * 0.5) * s
+		var vp_w = view_size.x * s
+		var vp_h = view_size.y * s
+		_minimap_viewport_rect.position = Vector2(vp_x, vp_y)
+		_minimap_viewport_rect.size = Vector2(vp_w, vp_h)
 
 func _refresh_minimap() -> void:
 	for i in range(_minimap_enemy_dots.size()):
@@ -5226,28 +5270,209 @@ func _on_hud_hero_selected(id: int) -> void:
 		_switch_hero(id)
 
 func _on_gh_pressed() -> void:
-	# GH = Basculer la minimap
 	if _minimap_panel != null:
 		var container: Control = _minimap_panel.get_parent() as Control
 		if container != null:
 			container.visible = not container.visible
+			if container.visible:
+				_update_minimap()
 
 func _on_dh_pressed() -> void:
 	# DH = Afficher les détails du héros
-	var gd = GameData
-	if gd.current_mode == GameData.SelectionMode.HERO and gd.current_id >= 0 and gd.current_id < gd.heroes.size():
-		var h = gd.heroes[gd.current_id]
-		var info = "%s (Niv.%d)\nATK %d DEF %d\nHP %d/%d\nArmée: %d créatures" % [
-			h.name, _hero_level,
-			_hero_attack, _hero_defense,
-			_hero_hp, _hero_max_hp,
-			_hero_army_count()
-		]
-		_create_floating_text(info, Color(0.9, 0.85, 0.7), _hero.position + Vector2(0, -80))
-	elif gd.heroes.size() > 0:
-		var h = gd.heroes[0]
-		gd.set_selection(GameData.SelectionMode.HERO, 0, h.position)
-		_on_dh_pressed()
+	if _hero_details_visible:
+		_hide_hero_details()
+		return
+	if _hero == null:
+		return
+	var hero_name: String = _get_active_hero_name()
+	_show_hero_details(hero_name)
+
+func _show_hero_details(hero_name: String) -> void:
+	if _hero_details_visible:
+		return
+	if _hud:
+		var sel_panel = _hud.find_child("SelectionPanel", true, false)
+		if sel_panel:
+			sel_panel.visible = false
+	var vp := get_viewport().get_visible_rect().size
+
+	_hero_details_layer = CanvasLayer.new()
+	_hero_details_layer.name = "HeroDetailsLayer"
+	_hero_details_layer.layer = 128
+	add_child(_hero_details_layer)
+
+	_hero_details_overlay = Panel.new()
+	_hero_details_overlay.name = "HeroDetailsOverlay"
+	_hero_details_overlay.size = vp
+	_hero_details_overlay.position = Vector2.ZERO
+	var ol_style := StyleBoxFlat.new()
+	ol_style.bg_color = Color(0.0, 0.0, 0.0, 0.7)
+	_hero_details_overlay.add_theme_stylebox_override("panel", ol_style)
+	_hero_details_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_hero_details_layer.add_child(_hero_details_overlay)
+
+	var panel := Panel.new()
+	panel.name = "HeroDetailsPanel"
+	panel.size = Vector2(min(420, vp.x - 40), min(520, vp.y - 40))
+	panel.position = Vector2(vp.x / 2 - panel.size.x / 2, vp.y / 2 - panel.size.y / 2)
+	panel.add_theme_stylebox_override("panel", JapaneseUITheme.panel_style(12))
+	_hero_details_overlay.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vbox.add_theme_constant_override("separation", 6)
+	var m := 16
+	vbox.add_theme_constant_override("margin_left", m)
+	vbox.add_theme_constant_override("margin_right", m)
+	vbox.add_theme_constant_override("margin_top", m)
+	vbox.add_theme_constant_override("margin_bottom", m)
+	panel.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "⚔ %s" % hero_name
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", JapaneseUITheme.COLOR_GOLD)
+	vbox.add_child(title)
+
+	var lvl := Label.new()
+	lvl.text = "Niveau %d" % [_hero_level]
+	lvl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lvl.add_theme_font_size_override("font_size", 14)
+	lvl.add_theme_color_override("font_color", Color(0.7, 0.85, 0.95))
+	vbox.add_child(lvl)
+
+	vbox.add_child(_make_hsep_d())
+
+	var stats_grid := GridContainer.new()
+	stats_grid.columns = 2
+	stats_grid.add_theme_constant_override("h_separation", 24)
+	stats_grid.add_theme_constant_override("v_separation", 4)
+	vbox.add_child(stats_grid)
+
+	stats_grid.add_child(_hero_stat_lbl("ATK"))
+	stats_grid.add_child(_hero_stat_val(str(_hero_attack), Color(0.95, 0.5, 0.5)))
+	stats_grid.add_child(_hero_stat_lbl("DEF"))
+	stats_grid.add_child(_hero_stat_val(str(_hero_defense), Color(0.5, 0.7, 0.95)))
+	stats_grid.add_child(_hero_stat_lbl("HP"))
+	stats_grid.add_child(_hero_stat_val("%d/%d" % [_hero_hp, _hero_max_hp], Color(0.5, 0.95, 0.5)))
+	stats_grid.add_child(_hero_stat_lbl("MP"))
+	stats_grid.add_child(_hero_stat_val("%d/%d" % [_hero_mp, _hero_max_mp], Color(0.5, 0.85, 0.95)))
+
+	vbox.add_child(_make_hsep_d())
+
+	var xp_label := Label.new()
+	xp_label.text = "XP: %d / %d" % [_hero_xp, _hero_xp_to_next]
+	xp_label.add_theme_font_size_override("font_size", 12)
+	xp_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.75))
+	vbox.add_child(xp_label)
+
+	var xp_bar := ColorRect.new()
+	xp_bar.custom_minimum_size = Vector2(0, 14)
+	xp_bar.size = Vector2(panel.size.x - m * 2, 14)
+	xp_bar.color = Color(0.15, 0.10, 0.08)
+	xp_bar.add_theme_stylebox_override("panel", _bar_bg_style())
+	var xp_fill := ColorRect.new()
+	xp_fill.name = "XPFill"
+	var xp_ratio := float(_hero_xp) / float(max(_hero_xp_to_next, 1))
+	xp_fill.size = Vector2(max(2, (panel.size.x - m * 2) * xp_ratio), 14)
+	xp_fill.color = Color(0.7, 0.55, 0.2)
+	xp_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	xp_bar.add_child(xp_fill)
+	vbox.add_child(xp_bar)
+
+	vbox.add_child(_make_hsep_d())
+
+	var army_title := Label.new()
+	army_title.text = "Armée"
+	army_title.add_theme_font_size_override("font_size", 14)
+	army_title.add_theme_color_override("font_color", Color(0.95, 0.85, 0.3))
+	vbox.add_child(army_title)
+
+	if _hero_army.size() > 0:
+		for unit in _hero_army:
+			var u_type := str(unit.get("type", ""))
+			var u_data: Dictionary = UNIT_TYPES.get(u_type, {})
+			var u_name: String = u_data.get("name", u_type)
+			var u_count: int = unit.get("count", 0)
+			if u_count <= 0:
+				continue
+			var ulbl := Label.new()
+			ulbl.text = "• %s x%d" % [u_name, u_count]
+			ulbl.add_theme_font_size_override("font_size", 13)
+			ulbl.add_theme_color_override("font_color", Color(0.85, 0.85, 0.75))
+			vbox.add_child(ulbl)
+	else:
+		var empty_lbl := Label.new()
+		empty_lbl.text = "Aucune créature"
+		empty_lbl.add_theme_font_size_override("font_size", 13)
+		empty_lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.5))
+		vbox.add_child(empty_lbl)
+
+	vbox.add_child(_make_hsep_d())
+
+	var close_hbox := HBoxContainer.new()
+	close_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(close_hbox)
+
+	var close_btn := Button.new()
+	close_btn.text = "Fermer"
+	close_btn.custom_minimum_size = Vector2(180, 40)
+	close_btn.size = Vector2(180, 40)
+	close_btn.add_theme_font_size_override("font_size", 15)
+	JapaneseUITheme.style_button(close_btn)
+	JapaneseUITheme.add_hover_scale(close_btn)
+	close_btn.pressed.connect(_hide_hero_details)
+	close_hbox.add_child(close_btn)
+
+	_hero_details_visible = true
+
+func _hide_hero_details() -> void:
+	_hero_details_visible = false
+	if _hero_details_overlay:
+		_hero_details_overlay.queue_free()
+		_hero_details_overlay = null
+	if _hero_details_layer:
+		_hero_details_layer.queue_free()
+		_hero_details_layer = null
+
+func _hero_stat_lbl(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", 14)
+	l.add_theme_color_override("font_color", Color(0.7, 0.7, 0.65))
+	l.custom_minimum_size = Vector2(80, 22)
+	return l
+
+func _hero_stat_val(text: String, color: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", 14)
+	l.add_theme_color_override("font_color", color)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	l.custom_minimum_size = Vector2(80, 22)
+	return l
+
+func _make_hsep_d() -> ColorRect:
+	var r := ColorRect.new()
+	r.custom_minimum_size = Vector2(0, 8)
+	r.color = Color.TRANSPARENT
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return r
+
+func _bar_bg_style() -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = Color(0.12, 0.10, 0.08)
+	s.border_color = Color(0.35, 0.28, 0.18)
+	s.border_width_left = 1
+	s.border_width_right = 1
+	s.border_width_top = 1
+	s.border_width_bottom = 1
+	s.corner_radius_top_left = 3
+	s.corner_radius_top_right = 3
+	s.corner_radius_bottom_left = 3
+	s.corner_radius_bottom_right = 3
+	return s
 
 func _on_gm_pressed() -> void:
 	# GM = Afficher la carte du monde (zoom arrière)
@@ -5325,6 +5550,13 @@ func _on_dbt_pressed() -> void:
 	_end_turn()
 	_create_floating_text("Tour terminé", Color(0.7, 0.9, 0.7), _get_viewport_center())
 
+func _get_collected_indices(arr: Array, key: String) -> Array:
+	var indices: Array = []
+	for i in range(arr.size()):
+		if arr[i].get(key, false):
+			indices.append(i)
+	return indices
+
 func _save_game() -> void:
 	var save_data = {
 		"hero_level": _hero_level,
@@ -5353,6 +5585,12 @@ func _save_game() -> void:
 		"unlocked_heroes": _unlocked_heroes,
 		"player_items": _player_items,
 		"water_walk_turns": _water_walk_turns,
+		"rng_seed": rng.seed,
+		"fog_grid": _fog_grid,
+		"fog_current_alpha": _fog_current_alpha,
+		"resources_collected": _get_collected_indices(_resources, "collected"),
+		"treasures_opened": _get_collected_indices(_treasures, "opened"),
+		"camera_zoom": {"x": _camera.zoom.x, "y": _camera.zoom.y},
 	}
 	
 	var json_string = JSON.stringify(save_data)
@@ -5443,7 +5681,44 @@ func _load_game() -> void:
 
 	_player_items = data.get("player_items", [])
 	_water_walk_turns = data.get("water_walk_turns", 0)
-	
+
+	# Restaurer le brouillard de guerre
+	var loaded_fog = data.get("fog_grid", [])
+	if loaded_fog.size() > 0:
+		_fog_grid = loaded_fog.duplicate(true)
+	var loaded_alpha = data.get("fog_current_alpha", [])
+	if loaded_alpha.size() > 0:
+		_fog_current_alpha = loaded_alpha.duplicate(true)
+
+	# Restaurer l'état collecté/ouvert des ressources et trésors
+	var res_collected = data.get("resources_collected", [])
+	for i in res_collected:
+		if i >= 0 and i < _resources.size():
+			_resources[i]["collected"] = true
+			if i < _resource_visuals.size():
+				_resource_visuals[i].visible = false
+	var tres_opened = data.get("treasures_opened", [])
+	for i in tres_opened:
+		if i >= 0 and i < _treasures.size():
+			_treasures[i]["opened"] = true
+			if i < _treasure_visuals.size():
+				_treasure_visuals[i].visible = false
+
+	# Restaurer le zoom caméra (sauvé en tant que dictionnaire x/y)
+	var cam_zoom = data.get("camera_zoom", null)
+	if cam_zoom != null and typeof(cam_zoom) == TYPE_DICTIONARY:
+		_camera.zoom = Vector2(cam_zoom.get("x", 1.0), cam_zoom.get("y", 1.0))
+
+	# Rafraîchir l'affichage du brouillard
+	if _fog_image != null and _fog_texture != null:
+		for x in range(_zone_w):
+			for y in range(_zone_h):
+				_paint_fog_tile(x, y)
+		_fog_texture.update(_fog_image)
+	_update_fog_of_war()
+	_update_entity_visibility()
+	_update_resource_labels()
+
 	# Mettre à jour la caméra
 	_camera.position = _hero.position
 	
@@ -5520,8 +5795,6 @@ func _register_game_data() -> void:
 	print("✓ GameData enregistré: %d héros, %d villes" % [GameData.heroes.size(), GameData.cities.size()])
 
 func _spawn_neutral_creatures() -> void:
-
-	rng.randomize()
 	var types = ["Loup", "Gobelin", "Squelette", "Araignée", "Lézard"]
 	for i in range(36):
 		var tx = rng.randi_range(3, _zone_w - 4)
