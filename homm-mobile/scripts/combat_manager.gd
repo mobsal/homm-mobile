@@ -6,15 +6,44 @@ signal combat_defeat()
 signal combat_fled()
 
 # ============================================
-# COMBAT MANAGER v2 — combat 1v1
+# COMBAT MANAGER v3 — combat 1v1 avec sprites
 # ============================================
 
 var _combat_panel: Panel
 var _combat_bg: TextureRect
+var _combat_fog: ColorRect = null
+var _fog_time: float = 0.0
+const FOG_SHADER_CODE := """
+shader_type canvas_item;
+
+uniform float time : hint_range(0.0, 100.0) = 0.0;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+
+float noise(vec2 p) {
+	vec2 i = floor(p); vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+void fragment() {
+	vec2 uv = UV;
+	float n1 = noise(uv * 3.0 + time * 0.02);
+	float n2 = noise(uv * 5.0 - time * 0.03 + 100.0);
+	float fog = n1 * 0.6 + n2 * 0.4;
+	fog = smoothstep(0.2, 0.6, fog);
+	vec2 d = min(UV, 1.0 - UV);
+	float vignette = 1.0 - smoothstep(0.0, 0.2, min(d.x, d.y));
+	float alpha = fog * 0.20 + vignette * 0.25;
+	COLOR = vec4(0.02, 0.03, 0.06, alpha);
+}
+"""
 var _vfx: CombatVFX
 var _action_bar: HBoxContainer
 var _hero_card: Panel
 var _enemy_card: Panel
+var _hero_sprite_node: Sprite2D
+var _enemy_sprite_node: Sprite2D
 var _hero_hp_fill: ColorRect
 var _enemy_hp_fill: ColorRect
 var _hero_info_label: Label
@@ -38,6 +67,7 @@ var _hero_attack_buff: bool = false
 var _hero_mana: int = 80
 var _hero_max_mana: int = 80
 var _mana_label: Label
+var _sprite_generator: SpriteGenerator
 
 const SPELL_COST: Dictionary = {
 	"fireball": 8,
@@ -76,11 +106,158 @@ const COLOR_GREEN := Color(0.18, 0.65, 0.22)
 const COLOR_RED := Color(0.75, 0.18, 0.12)
 const COLOR_WHITE := Color(0.95, 0.95, 0.92)
 
+# Nom → créature : permet de mapper les noms français des unités vers les sprites existants
+const NAME_TO_CREATURE: Dictionary = {
+	"samurai": "hero_samurai",
+	"archer": "archer",
+	"piquier": "skeleton",
+	"pikeman": "skeleton",
+	"épéiste": "swordsman",
+	"epeiste": "swordsman",
+	"goblin": "goblin",
+	"knight": "knight",
+	"skeleton": "skeleton",
+	"swordsman": "swordsman",
+	"griffon": "knight",
+	"cavalier": "knight",
+	"ange": "knight",
+	"horde": "goblin",
+	"horde ennemie": "goblin",
+	"ennemi": "goblin",
+	"boss": "skeleton",
+	"oni": "skeleton",
+	"dragon": "skeleton",
+}
+
+# Hero sprite cache (samurai de la carte)
+var _hero_samurai_texture: Texture2D = null
+
+# Creature sprite cache
+var _creature_sprites: Dictionary = {}
+var _creature_frames: Dictionary = {}
+
+var _hero_sprites_container: Control
+var _enemy_sprites_container: Control
+
+var _visual_env: WorldEnvironment = null
+var _vignette_overlay: ColorRect = null
+
 func _ready() -> void:
 	visible = false
 	_setup_styles()
 	_setup_ui()
 	_vfx = CombatVFX.new(self)
+	_preload_creature_sprites()
+	_visual_env = VisualEnhancer.add_world_environment(self)
+	_vignette_overlay = VisualEnhancer.add_vignette_overlay(self)
+	_sprite_generator = SpriteGenerator.new()
+
+func _preload_creature_sprites() -> void:
+	_hero_samurai_texture = load("res://assets/heroes/hero_samurai_down.png")
+	if _hero_samurai_texture:
+		print("✓ Sprite samurai chargé")
+	else:
+		print("⚠ Sprite samurai non trouvé")
+	var base_path: String = "res://assets/homm3_advanced/units/"
+	var creature_types: Array[String] = ["archer", "goblin", "knight", "skeleton", "swordsman"]
+	var dirs: Array[String] = ["south", "east", "west", "north", "southeast", "southwest", "northeast", "northwest"]
+	for creature in creature_types:
+		for d in dirs:
+			var first_path: String = base_path + creature + "_" + d + "_0.png"
+			var first_tex: Texture2D = load(first_path)
+			if first_tex:
+				if not _creature_sprites.has(creature):
+					_creature_sprites[creature] = first_tex
+				var frames_key: String = creature + "_" + d
+				_creature_frames[frames_key] = [first_tex]
+				for f in range(1, 4):
+					var fp: String = base_path + creature + "_" + d + "_" + str(f) + ".png"
+					var ft: Texture2D = load(fp)
+					if ft:
+						_creature_frames[frames_key].append(ft)
+				if d == "south":
+					_creature_frames[creature] = _creature_frames[frames_key]
+		if _creature_sprites.has(creature):
+			print("✓ Sprites chargés: " + creature)
+		else:
+			print("⚠ Sprite non trouvé: " + creature)
+
+func _get_creature_texture(unit_name: String, direction: String = "south") -> Texture2D:
+	var key: String = unit_name.to_lower().strip_edges()
+	var mapped: String = NAME_TO_CREATURE.get(key, "")
+	if mapped == "hero_samurai":
+		return _hero_samurai_texture
+	if mapped != "":
+		var mk: String = mapped + "_" + direction
+		var mf: Array = _creature_frames.get(mk, _creature_frames.get(mapped, []))
+		if mf.size() > 0:
+			return mf[randi() % mf.size()]
+	for creature in _creature_sprites.keys():
+		if key.find(creature) != -1:
+			var frames_key: String = creature + "_" + direction
+			var frames: Array = _creature_frames.get(frames_key, _creature_frames.get(creature, []))
+			if frames.size() > 0:
+				return frames[randi() % frames.size()]
+	var fallback: Texture2D = _creature_sprites.get("knight")
+	if fallback:
+		return fallback
+	var generated: ImageTexture = _generate_unit_sprite(unit_name)
+	return generated
+
+func _generate_enemy_texture(unit_name: String) -> Texture2D:
+	var key: String = unit_name.to_lower().strip_edges()
+	var mapped: String = NAME_TO_CREATURE.get(key, "")
+	if mapped == "":
+		for c in _creature_sprites.keys():
+			if key.find(c) != -1:
+				mapped = c
+				break
+	if mapped == "" or mapped == "hero_samurai":
+		mapped = "skeleton"
+
+	var enemy_type: String = "enemy_" + mapped
+	if mapped == "knight" or mapped == "hero_samurai":
+		enemy_type = "enemy_skeleton"
+	var variant_seed: int = abs(key.hash()) % 100000
+	return _sprite_generator._generate_sprite(enemy_type, 64, variant_seed)
+
+func _generate_unit_sprite(unit_name: String) -> ImageTexture:
+	var img: Image = Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var hs: int = 32
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var body_color: Color
+	match unit_name.to_lower():
+		"archer": body_color = Color(0.35, 0.25, 0.18)
+		"goblin": body_color = Color(0.75, 0.15, 0.15)
+		"skeleton": body_color = Color(0.78, 0.82, 0.78)
+		"swordsman": body_color = Color(0.12, 0.08, 0.06)
+		"knight": body_color = Color(0.15, 0.15, 0.45)
+		_: body_color = Color(0.50, 0.50, 0.50)
+	for x in range(64):
+		for y in range(64):
+			var ox: float = (x - hs) / 20.0
+			var oy: float = (y - hs) / 20.0
+			var dist: float = ox * ox + oy * oy
+			if dist <= 1.0:
+				var shade: float = 1.0 - dist * 0.5
+				var c: Color = body_color
+				img.set_pixel(x, y, Color(c.r * shade, c.g * shade, c.b * shade))
+	for x in range(20, 44):
+		for y in range(8, 28):
+			var ox: float = float(x - 32) / 12.0
+			var oy: float = float(y - 18) / 10.0
+			if ox*ox + oy*oy <= 1.0:
+				img.set_pixel(x, y, Color(0.90, 0.75, 0.60))
+	return ImageTexture.create_from_image(img)
+
+func _process(delta: float) -> void:
+	_fog_time += delta
+	if _in_combat and _combat_fog and _combat_fog.material:
+		_combat_fog.material.set_shader_parameter("time", _fog_time)
+	if _vignette_overlay:
+		VisualEnhancer.set_vignette_time(_vignette_overlay, _fog_time)
 
 func _setup_styles() -> void:
 	_top_bar_style = StyleBoxFlat.new()
@@ -215,6 +392,17 @@ func _setup_ui() -> void:
 	_combat_bg.stretch_mode = TextureRect.STRETCH_SCALE
 	add_child(_combat_bg)
 
+	_combat_fog = ColorRect.new()
+	_combat_fog.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_combat_fog.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_combat_fog.visible = false
+	var fog_shader := Shader.new()
+	fog_shader.code = FOG_SHADER_CODE
+	var fog_mat := ShaderMaterial.new()
+	fog_mat.shader = fog_shader
+	_combat_fog.material = fog_mat
+	add_child(_combat_fog)
+
 	_combat_panel = Panel.new()
 	_combat_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_combat_panel.visible = false
@@ -261,7 +449,7 @@ func _setup_ui() -> void:
 
 	_turn_label = Label.new()
 	_turn_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_turn_label.position = Vector2(-20, 16)
+	_turn_label.position = Vector2(-180, 16)
 	_turn_label.text = "Votre tour"
 	_turn_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_turn_label.add_theme_color_override("font_color", COLOR_TEAL)
@@ -270,8 +458,8 @@ func _setup_ui() -> void:
 
 	_defense_indicator = Label.new()
 	_defense_indicator.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_defense_indicator.position = Vector2(40, -80)
-	_defense_indicator.text = "🛡 DÉFENSE ACTIVE"
+	_defense_indicator.position = Vector2(40, -210)
+	_defense_indicator.text = "DEFENSE +"
 	_defense_indicator.add_theme_color_override("font_color", COLOR_TEAL)
 	_defense_indicator.add_theme_font_size_override("font_size", 16)
 	_defense_indicator.visible = false
@@ -279,8 +467,8 @@ func _setup_ui() -> void:
 
 	_rage_indicator = Label.new()
 	_rage_indicator.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_rage_indicator.position = Vector2(40, -60)
-	_rage_indicator.text = "⚔ FUREUR ACTIVE"
+	_rage_indicator.position = Vector2(40, -190)
+	_rage_indicator.text = "FUREUR +"
 	_rage_indicator.add_theme_color_override("font_color", Color(0.95, 0.55, 0.10))
 	_rage_indicator.add_theme_font_size_override("font_size", 16)
 	_rage_indicator.visible = false
@@ -288,21 +476,21 @@ func _setup_ui() -> void:
 
 	_mana_label = Label.new()
 	_mana_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_mana_label.position = Vector2(40, -40)
+	_mana_label.position = Vector2(40, -140)
 	_mana_label.add_theme_color_override("font_color", COLOR_MANA_PURPLE)
 	_mana_label.add_theme_font_size_override("font_size", 14)
 	_combat_panel.add_child(_mana_label)
 
 	_hero_info_label = Label.new()
 	_hero_info_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_hero_info_label.position = Vector2(40, -24)
+	_hero_info_label.position = Vector2(40, -160)
 	_hero_info_label.add_theme_color_override("font_color", Color(0.30, 0.65, 0.85))
 	_hero_info_label.add_theme_font_size_override("font_size", 12)
 	_combat_panel.add_child(_hero_info_label)
 
 	_enemy_info_label = Label.new()
 	_enemy_info_label.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_enemy_info_label.position = Vector2(-200, -24)
+	_enemy_info_label.position = Vector2(-240, -160)
 	_enemy_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_enemy_info_label.add_theme_color_override("font_color", Color(0.85, 0.25, 0.25))
 	_enemy_info_label.add_theme_font_size_override("font_size", 12)
@@ -310,10 +498,10 @@ func _setup_ui() -> void:
 
 	_action_bar = HBoxContainer.new()
 	_action_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_action_bar.position = Vector2(-200, -80)
-	_action_bar.custom_minimum_size = Vector2(400, 50)
+	_action_bar.position = Vector2(-270, -80)
+	_action_bar.custom_minimum_size = Vector2(540, 54)
 	_action_bar.alignment = BoxContainer.ALIGNMENT_CENTER
-	_action_bar.add_theme_constant_override("separation", 20)
+	_action_bar.add_theme_constant_override("separation", 16)
 	_combat_panel.add_child(_action_bar)
 
 	_add_action_button("Attaquer", _on_attack_pressed, Color(0.75, 0.18, 0.12))
@@ -322,9 +510,9 @@ func _setup_ui() -> void:
 	_add_action_button("Fuir", _on_flee_pressed, Color(0.35, 0.30, 0.25))
 
 	_combat_log = RichTextLabel.new()
-	_combat_log.set_anchors_preset(Control.PRESET_TOP_WIDE, false)
-	_combat_log.position = Vector2(32, 90)
-	_combat_log.size = Vector2(-64, 100)
+	_combat_log.set_anchors_preset(Control.PRESET_CENTER, false)
+	_combat_log.position = Vector2(-430, 180)
+	_combat_log.size = Vector2(860, 100)
 	_combat_log.bbcode_enabled = true
 	_combat_log.add_theme_color_override("default_color", COLOR_TEXT_DIM)
 	_combat_log.add_theme_font_size_override("normal_font_size", 12)
@@ -341,7 +529,10 @@ func _setup_ui() -> void:
 
 	_spell_panel = Panel.new()
 	_spell_panel.set_anchors_preset(Control.PRESET_CENTER)
-	_spell_panel.custom_minimum_size = Vector2(420, 240)
+	_spell_panel.offset_left = -210
+	_spell_panel.offset_top = -120
+	_spell_panel.offset_right = 210
+	_spell_panel.offset_bottom = 120
 	_spell_panel.visible = false
 	var spell_style = StyleBoxFlat.new()
 	spell_style.bg_color = Color(0.05, 0.03, 0.08, 0.97)
@@ -392,7 +583,7 @@ func _add_action_button(text: String, callback: Callable, accent_color: Color) -
 	}
 	var btn = Button.new()
 	btn.text = action_icons.get(text, "") + text
-	btn.custom_minimum_size = Vector2(120, 54)
+	btn.custom_minimum_size = Vector2(123, 54)
 	btn.add_theme_font_size_override("font_size", 16)
 	btn.add_theme_color_override("font_color", COLOR_TEXT_LIGHT)
 	btn.add_theme_color_override("font_hover_color", COLOR_WHITE)
@@ -454,8 +645,8 @@ func _add_spell_button(text: String, accent_color: Color, spell_type: String, co
 # ============================================
 
 func _generate_battlefield_bg() -> ImageTexture:
-	var w: int = 270
-	var h: int = 600
+	var w: int = 540
+	var h: int = 1200
 	var img: Image = Image.create(w, h, false, Image.FORMAT_RGBA8)
 	var sky_h: int = int(h * 0.55)
 	var half_w: float = float(w) * 0.5
@@ -566,6 +757,59 @@ func _generate_battlefield_bg() -> ImageTexture:
 							var fade: float = 1.0 - t_seg * 0.25
 							img.set_pixel(mx, my, Color(col.r * fade, col.g * fade, col.b * fade, 1.0))
 
+	# --- Birds in the sky ---
+	var bird_rng := RandomNumberGenerator.new()
+	bird_rng.randomize()
+	for b in 6:
+		var bx: int = 30 + bird_rng.randi() % int(w - 60)
+		var by: int = 60 + bird_rng.randi() % 120
+		var bird_size: int = 2 + bird_rng.randi() % 2
+		for i in range(bird_size):
+			var bxx := bx + i * 3
+			var byy := by + i
+			if bxx >= 0 and bxx < w and byy >= 0 and byy < h:
+				img.set_pixel(bxx, byy, Color(0.10, 0.08, 0.12, 0.50))
+			bxx = bx - i * 3
+			if bxx >= 0 and bxx < w and byy >= 0 and byy < h:
+				img.set_pixel(bxx, byy, Color(0.10, 0.08, 0.12, 0.50))
+
+	# --- Clouds ---
+	var cloud_rng2 := RandomNumberGenerator.new()
+	cloud_rng2.randomize()
+	for c in 4:
+		var cx: int = cloud_rng2.randi() % w
+		var cy: int = 30 + cloud_rng2.randi() % 80
+		var cw2: int = 40 + cloud_rng2.randi() % 60
+		var ch2: int = 8 + cloud_rng2.randi() % 8
+		var alpha2: float = 0.06 + cloud_rng2.randf() * 0.08
+		for x in range(cx, cx + cw2):
+			for y in range(cy, cy + ch2):
+				var dx: float = (x - cx - cw2 / 2) / (cw2 / 2)
+				var dy: float = (y - cy - ch2 / 2) / (ch2 / 2)
+				if dx * dx + dy * dy <= 1.0 and x >= 0 and x < w and y >= 0 and y < h:
+					var existing2 := img.get_pixel(x, y)
+					var cloud_c2 := Color(0.70, 0.60, 0.50, alpha2)
+					img.set_pixel(x, y, existing2.lerp(cloud_c2, alpha2))
+
+	# --- Ground details (bushes, rocks) ---
+	var detail_rng := RandomNumberGenerator.new()
+	detail_rng.randomize()
+	for d in 30:
+		var dx2: int = detail_rng.randi() % w
+		var dy2: int = sky_h + 10 + detail_rng.randi() % int(h - sky_h - 20)
+		if detail_rng.randf() > 0.5:
+			for i in range(4):
+				var dxx := dx2 + detail_rng.randi() % 4 - 2
+				var dyy := dy2 + detail_rng.randi() % 3
+				if dxx >= 0 and dxx < w and dyy >= 0 and dyy < h:
+					img.set_pixel(dxx, dyy, Color(0.10, 0.25, 0.08))
+		else:
+			for i in range(3):
+				var dxx := dx2 + detail_rng.randi() % 3 - 1
+				var dyy := dy2 + detail_rng.randi() % 2
+				if dxx >= 0 and dxx < w and dyy >= 0 and dyy < h:
+					img.set_pixel(dxx, dyy, Color(0.18, 0.15, 0.12))
+
 	for y in range(h):
 		var vig_y: float = pow((float(y) - half_h) / half_h, 2) * 0.10
 		for x in range(w):
@@ -620,6 +864,8 @@ func start_combat(hero_data: Dictionary, enemy_data: Dictionary, enemy_index: in
 	visible = true
 	_combat_bg.visible = true
 	_combat_bg.modulate.a = 0.0
+	if _combat_fog:
+		_combat_fog.visible = true
 	_combat_panel.visible = true
 	_combat_panel.modulate.a = 0.0
 	_combat_panel.scale = Vector2(0.9, 0.9)
@@ -853,6 +1099,8 @@ func _spawn_result_panel(outcome: String) -> void:
 				panel.queue_free()
 			visible = false
 			_combat_bg.visible = false
+			if _combat_fog:
+				_combat_fog.visible = false
 			_combat_panel.visible = false
 			match outcome:
 				"victory":
@@ -1214,27 +1462,117 @@ func _update_unit_displays() -> void:
 		_hero_card.queue_free()
 	if _enemy_card:
 		_enemy_card.queue_free()
+	if _hero_sprites_container:
+		_hero_sprites_container.queue_free()
+	if _enemy_sprites_container:
+		_enemy_sprites_container.queue_free()
+	_hero_sprite_node = null
+	_enemy_sprite_node = null
+
+	var vw: float = 	get_viewport().size.x
+	var cx: float = vw * 0.5
+	var spacing: float = vw * 0.22
 
 	_hero_card = _create_unit_card(_hero_unit, true)
 	_enemy_card = _create_unit_card(_enemy_unit, false)
 
-	_hero_card.position = Vector2(60, 120)
-	_hero_card.custom_minimum_size = Vector2(200, 120)
+	_hero_card.position = Vector2(cx - spacing - 80, 280)
+	_hero_card.custom_minimum_size = Vector2(160, 85)
 	_combat_panel.add_child(_hero_card)
 
-	_enemy_card.position = Vector2(1020, 120)
-	_enemy_card.custom_minimum_size = Vector2(200, 120)
+	_enemy_card.position = Vector2(cx + spacing - 80, 280)
+	_enemy_card.custom_minimum_size = Vector2(160, 85)
 	_combat_panel.add_child(_enemy_card)
+
+	_add_creature_sprite(_hero_unit, true)
+	_add_creature_sprite(_enemy_unit, false)
 
 	_hero_info_label.text = _hero_unit.get("name", "Heros") + " | ATK:" + str(_hero_unit.get("attack", 0)) + " DEF:" + str(_hero_unit.get("defense", 0))
 	_enemy_info_label.text = _enemy_unit.get("name", "Ennemi") + " | ATK:" + str(_enemy_unit.get("attack", 0)) + " DEF:" + str(_enemy_unit.get("defense", 0))
 
+func _add_creature_sprite(unit: Dictionary, is_hero: bool) -> void:
+	var unit_name: String = unit.get("name", "Heros" if is_hero else "Ennemi")
+	var direction: String = "east" if is_hero else "west"
+
+	var tex: Texture2D
+	var target_size: float = 240.0
+
+	if is_hero:
+		tex = _get_creature_texture(unit_name, direction)
+		if not tex:
+			return
+	else:
+		tex = _generate_enemy_texture(unit_name)
+		if not tex:
+			return
+
+	var tex_size: float = 48.0 if is_hero else 64.0
+	var scale_val: float = target_size / tex_size
+
+	var sprite := Sprite2D.new()
+	sprite.texture = tex
+	sprite.scale = Vector2(scale_val, scale_val)
+	sprite.z_index = 10
+	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+
+	var outline_shader := load("res://shaders/sprite_outline.gdshader")
+	if outline_shader:
+		var mat := ShaderMaterial.new()
+		mat.shader = outline_shader
+		if is_hero:
+			mat.set_shader_parameter("outline_color", Color(0, 0, 0, 0.8))
+			mat.set_shader_parameter("outline_width", 1.0)
+			mat.set_shader_parameter("glow_color", Color(1.0, 0.9, 0.5, 0.3))
+			mat.set_shader_parameter("glow_width", 4.0)
+			mat.set_shader_parameter("glow_intensity", 0.2)
+		else:
+			mat.set_shader_parameter("outline_color", Color(0, 0, 0, 0.85))
+			mat.set_shader_parameter("outline_width", 1.0)
+			mat.set_shader_parameter("glow_color", Color(0.8, 0.2, 0.2, 0.3))
+			mat.set_shader_parameter("glow_width", 3.0)
+			mat.set_shader_parameter("glow_intensity", 0.15)
+		sprite.material = mat
+
+	var container := Control.new()
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.z_index = 10
+
+	var vw: float = 	get_viewport().size.x
+	var cx: float = vw * 0.5
+	var spacing: float = vw * 0.22
+	var sprite_centered_y: int = 490
+	if is_hero:
+		container.position = Vector2(cx - spacing, sprite_centered_y)
+		_hero_sprite_node = sprite
+	else:
+		container.position = Vector2(cx + spacing, sprite_centered_y)
+		_enemy_sprite_node = sprite
+
+	var shadow := ColorRect.new()
+	shadow.size = Vector2(120, 18)
+	shadow.position = Vector2(-60, int(target_size * 0.5) + 4)
+	shadow.color = Color(0, 0, 0, 0.30)
+	shadow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.add_child(shadow)
+
+	container.add_child(sprite)
+	_combat_panel.add_child(container)
+
+	if is_hero:
+		_hero_sprites_container = container
+	else:
+		_enemy_sprites_container = container
+
+	var tw := create_tween().set_loops().set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(container, "position:y", container.position.y + 10, 1.4)
+	tw.tween_property(container, "position:y", container.position.y, 1.4)
+
 func _create_unit_card(unit: Dictionary, is_hero: bool) -> Panel:
 	var card = Panel.new()
-	card.size = Vector2(160, 100)
+	card.size = Vector2(160, 85)
 
 	var card_style = StyleBoxFlat.new()
-	card_style.bg_color = COLOR_HERO_BLUE if is_hero else COLOR_ENEMY_RED
+	card_style.bg_color = Color(0.04, 0.04, 0.08, 0.95)
 	card_style.border_color = Color(0.35, 0.60, 0.85) if is_hero else Color(0.85, 0.25, 0.25)
 	card_style.border_width_left = 2
 	card_style.border_width_right = 2
@@ -1246,39 +1584,43 @@ func _create_unit_card(unit: Dictionary, is_hero: bool) -> Panel:
 	card_style.corner_radius_bottom_right = 12
 	card.add_theme_stylebox_override("panel", card_style)
 
+	var card_unit_name: String = unit.get("name", "Unite")
+	var card_dir: String = "east" if is_hero else "west"
+
+	var hp_ratio: float = float(unit.get("hp", 1)) / max(1, unit.get("max_hp", 1))
+
 	var name_label = Label.new()
 	name_label.position = Vector2(8, 4)
-	name_label.size = Vector2(144, 20)
-	name_label.text = unit.get("name", "Unite")
-	name_label.add_theme_color_override("font_color", COLOR_TEXT_LIGHT)
+	name_label.size = Vector2(144, 18)
+	name_label.text = card_unit_name
+	name_label.add_theme_color_override("font_color", Color(0.35, 0.60, 0.85) if is_hero else Color(0.85, 0.25, 0.25))
 	name_label.add_theme_font_size_override("font_size", 12)
 	card.add_child(name_label)
 
 	var hp_bar_bg = ColorRect.new()
-	hp_bar_bg.position = Vector2(8, 28)
+	hp_bar_bg.position = Vector2(8, 26)
 	hp_bar_bg.size = Vector2(144, 12)
-	hp_bar_bg.color = Color(0.20, 0.04, 0.04)
+	hp_bar_bg.color = Color(0.15, 0.03, 0.03)
 	card.add_child(hp_bar_bg)
 
 	var hp_fill = ColorRect.new()
-	hp_fill.name = "HPFill"
-	hp_fill.position = Vector2(8, 28)
-	var hp_ratio: float = float(unit.get("hp", 1)) / max(1, unit.get("max_hp", 1))
-	hp_fill.size = Vector2(144 * hp_ratio, 12)
+	hp_fill.position = Vector2(9, 27)
+	hp_fill.size = Vector2(max(1, 142 * hp_ratio), 10)
 	hp_fill.color = COLOR_GREEN if hp_ratio > 0.5 else (Color(0.95, 0.75, 0.10) if hp_ratio > 0.25 else COLOR_RED)
 	card.add_child(hp_fill)
 
 	var hp_text = Label.new()
-	hp_text.position = Vector2(8, 28)
+	hp_text.position = Vector2(8, 26)
 	hp_text.size = Vector2(144, 12)
 	hp_text.text = str(unit.get("hp", 0)) + "/" + str(unit.get("max_hp", 1))
 	hp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hp_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hp_text.add_theme_color_override("font_color", Color(0.95, 0.95, 0.92))
 	hp_text.add_theme_font_size_override("font_size", 9)
 	card.add_child(hp_text)
 
 	var stats = Label.new()
-	stats.position = Vector2(8, 44)
+	stats.position = Vector2(8, 42)
 	stats.size = Vector2(144, 16)
 	var atk = unit.get("attack", 0)
 	var def = unit.get("defense", 0)
@@ -1290,18 +1632,32 @@ func _create_unit_card(unit: Dictionary, is_hero: bool) -> Panel:
 	stats.add_theme_font_size_override("font_size", 10)
 	card.add_child(stats)
 
+	var hp_pct = int(hp_ratio * 100)
+	var hp_pct_label = Label.new()
+	hp_pct_label.position = Vector2(8, 60)
+	hp_pct_label.size = Vector2(144, 14)
+	hp_pct_label.text = "HP: " + str(hp_pct) + "%"
+	var hp_pct_color = COLOR_GREEN if hp_pct > 50 else (Color(0.95, 0.75, 0.10) if hp_pct > 25 else COLOR_RED)
+	hp_pct_label.add_theme_color_override("font_color", hp_pct_color)
+	hp_pct_label.add_theme_font_size_override("font_size", 10)
+	card.add_child(hp_pct_label)
+
 	if _hero_defending and is_hero:
 		var sh = Label.new()
-		sh.position = Vector2(120, 4)
-		sh.text = "🛡"
-		sh.add_theme_font_size_override("font_size", 16)
+		sh.position = Vector2(8, 72)
+		sh.size = Vector2(144, 12)
+		sh.text = "DEFENSE +"
+		sh.add_theme_color_override("font_color", COLOR_TEAL)
+		sh.add_theme_font_size_override("font_size", 10)
 		card.add_child(sh)
 
 	if _hero_attack_buff and is_hero:
 		var ra = Label.new()
-		ra.position = Vector2(140, 4)
-		ra.text = "⚔"
-		ra.add_theme_font_size_override("font_size", 16)
+		ra.position = Vector2(8, 72)
+		ra.size = Vector2(144, 12)
+		ra.text = "FUREUR +"
+		ra.add_theme_color_override("font_color", Color(0.95, 0.55, 0.10))
+		ra.add_theme_font_size_override("font_size", 10)
 		card.add_child(ra)
 
 	return card
@@ -1318,13 +1674,13 @@ func _show_turn_banner(text: String, color: Color) -> void:
 	banner.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.50))
 	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	banner.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	banner.set_anchors_preset(Control.PRESET_CENTER)
-	banner.position = Vector2(0, -100)
+	banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	banner.position = Vector2(0, 200)
 	banner.size = Vector2(0, 80)
 	_combat_panel.add_child(banner)
 
 	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
-	tween.tween_property(banner, "position:y", -120, 0.6)
+	tween.tween_property(banner, "position:y", 220, 0.6)
 	tween.parallel().tween_property(banner, "modulate:a", 0.0, 0.6)
 	tween.tween_callback(func(): banner.queue_free())
 

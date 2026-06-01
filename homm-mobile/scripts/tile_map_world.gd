@@ -4,6 +4,10 @@ extends Node2D
 const TILE_SIZE: int = 64
 const COMBAT_SCENE := preload("res://scenes/combat_manager.tscn")
 
+# Pixel art terrain tiles preloadés
+var _pixel_tiles: Dictionary = {}  # int -> Array[Image] (3 variants per type)
+var _pixel_tiles_loaded: bool = false
+
 # Dimensions du monde (NOUVEAUX noms pour éviter le cache Godot)
 var _map_width: int = 120
 var _map_height: int = 80
@@ -47,6 +51,8 @@ var _hero_tile: Vector2i = Vector2i.ZERO
 
 # Référence vers le générateur de sprites extrait
 var _sg := SpriteGenerator.new()
+var _vignette_overlay: ColorRect = null
+var _visual_env: WorldEnvironment = null
 
 # Ressources du joueur
 var _gold: int = 800
@@ -107,6 +113,7 @@ func _async_init() -> void:
 	_init_quests()
 	_update_fog_of_war()
 	_create_sky_background()
+	_setup_visual_enhancements()
 
 	_combat_manager = COMBAT_SCENE.instantiate()
 	_combat_manager.combat_victory.connect(_on_combat_victory)
@@ -126,7 +133,7 @@ func _async_init() -> void:
 	print("✓ ", WANDERER_COUNT, " ennemis errants créés")
 	print("✓ ", _bosses.size(), " boss créés")
 	print("✓ ", RESOURCE_COUNT, " ressources à collecter")
-	print("✓ Arbres créés : ", TREE_COUNT, " arbres avec forêts et groupes")
+	print("✓ Arbres: tuiles forêt pixel art (pas de sprites d'arbres externes)")
 	print("✓ Rochers créés : ", ROCK_COUNT, " rochers")
 	print("✓ Effet de sélection doré autour du héros")
 	print("✓ Prêt pour l'aventure !")
@@ -153,11 +160,7 @@ func _create_map() -> void:
 	_map_sprite.texture = map_texture
 	_map_sprite.position = Vector2(_zone_w * TILE_SIZE / 2, _zone_h * TILE_SIZE / 2)  # Centré sur la map
 	_map_sprite.set_z_index(-10)
-	var water_shader: Shader = load("res://shaders/water.gdshader")
-	if water_shader:
-		var mat = ShaderMaterial.new()
-		mat.shader = water_shader
-		_map_sprite.material = mat
+	_map_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	add_child(_map_sprite)
 	_create_fog_overlay()
 	print("=== TERRAIN SPRITE CRÉÉ: ", _zone_w, "×", _zone_h, " tuiles ===")
@@ -368,23 +371,32 @@ func _generate_tile_texture(tile_type: int) -> Image:
 	
 	return img
 
+func _preload_terrain_tiles() -> void:
+	if _pixel_tiles_loaded:
+		return
+	var type_names: Array[String] = ["grass", "dirt", "water", "mountain", "forest", "plains"]
+	for t in range(type_names.size()):
+		var variants: Array[Image] = []
+		for v in range(3):
+			var path: String = "res://assets/terrain/%s_%d.png" % [type_names[t], v]
+			var tex: Texture2D = load(path)
+			if tex:
+				var img: Image = tex.get_image()
+				if img and img.get_size() == Vector2i(TILE_SIZE, TILE_SIZE):
+					if img.get_format() != Image.FORMAT_RGBA8:
+						img.convert(Image.FORMAT_RGBA8)
+					variants.append(img)
+		if variants.size() > 0:
+			_pixel_tiles[t] = variants
+			print("✓ Tuiles pixel art chargées: ", type_names[t], " (", variants.size(), " variantes)")
+		else:
+			_pixel_tiles[t] = []
+			print("⚠ Tuiles pixel art non trouvées: ", type_names[t], " (fallback procédural)")
+	_pixel_tiles_loaded = true
+
 func _generate_map_image() -> ImageTexture:
 	var w: int = _zone_w
 	var h: int = _zone_h
-	
-	# === COULEURS JAPONAIS MÉDIÉVAL ===
-	var C_GRASS: Color = Color(0.25, 0.42, 0.18)      # Herbe principale (bamboo green muted)
-	var C_GRASS_LIGHT: Color = Color(0.35, 0.52, 0.26)  # Herbe claire/prairie
-	var C_DIRT: Color = Color(0.52, 0.42, 0.30)        # Terre/sable (warm earth)
-	var C_WATER: Color = Color(0.15, 0.28, 0.45)       # Eau profonde (indigo)
-	var _C_WATER_SHALLOW: Color = Color(0.20, 0.35, 0.52)  # Eau peu profonde
-	var C_MOUNTAIN: Color = Color(0.45, 0.42, 0.40)    # Montagne (stone gray)
-	var _C_MOUNTAIN_DARK: Color = Color(0.35, 0.32, 0.30)  # Montagne sombre
-	var C_FOREST: Color = Color(0.15, 0.28, 0.12)      # Forêt dense (deep green)
-	var C_SAND: Color = Color(0.65, 0.55, 0.42)        # Sable (bordure eau)
-	var C_ROCK: Color = Color(0.50, 0.46, 0.42)         # Roche (bordure montagne)
-	
-	var base_colors: Array[Color] = [C_GRASS, C_DIRT, C_WATER, C_MOUNTAIN, C_FOREST, C_GRASS_LIGHT]
 	
 	# Grille de terrain (stockée globalement)
 	_terrain_move_cost = {
@@ -528,25 +540,12 @@ func _generate_map_image() -> ImageTexture:
 			if px >= 0 and px < w and py >= 0 and py < h:
 				_terrain_grid[px][py] = 0
 	
-	# === COULEURS DE TERRAIN (plus riches et saturées) ===
-	var _colors: Array[Color] = [
-		Color(0.28, 0.46, 0.18),  # 0: Herbe
-		Color(0.58, 0.48, 0.32),  # 1: Terre
-		Color(0.10, 0.28, 0.52),  # 2: Eau
-		Color(0.45, 0.42, 0.38),  # 3: Montagne
-		Color(0.12, 0.28, 0.10),  # 4: Forêt
-		Color(0.40, 0.56, 0.26),  # 5: Herbe claire
-	]
-	
-	# === DESSINER L'IMAGE AVEC TUILES TEXTURÉES ===
+	# === DESSINER L'IMAGE AVEC TUILES PIXEL ART ===
 	var img_width: int = w * TILE_SIZE
 	var img_height: int = h * TILE_SIZE
 	var map_image: Image = Image.create(img_width, img_height, false, Image.FORMAT_RGBA8)
 
-	# Pré-générer UNE texture par type de terrain (au lieu de 9600 appels)
-	var tile_cache: Array[Image] = []
-	for t in range(6):
-		tile_cache.append(_generate_tile_texture(t))
+	_preload_terrain_tiles()
 
 	var tile_rect := Rect2i(0, 0, TILE_SIZE, TILE_SIZE)
 	for x in range(w):
@@ -554,62 +553,12 @@ func _generate_map_image() -> ImageTexture:
 			await get_tree().process_frame
 		for y in range(h):
 			var tile_type: int = _terrain_grid[x][y]
-			map_image.blit_rect(tile_cache[tile_type], tile_rect, Vector2i(x * TILE_SIZE, y * TILE_SIZE))
-
-	await get_tree().process_frame
-
-	# === TRANSITIONS DOUCES ENTRE BIOMES (pixel-perfect avec bruit) ===
-	for x in range(w):
-		for y in range(h):
-			var current_type: int = _terrain_grid[x][y]
-			for dx in range(-1, 2):
-				for dy in range(-1, 2):
-					if dx == 0 and dy == 0:
-						continue
-					var nx: int = x + dx
-					var ny: int = y + dy
-					if nx < 0 or nx >= w or ny < 0 or ny >= h:
-						continue
-					if _terrain_grid[nx][ny] == current_type:
-						continue
-			
-					var tx: int = x * TILE_SIZE
-					var ty: int = y * TILE_SIZE
-					var start_px: int = 0 if dx != 1 else TILE_SIZE - 8
-					var start_py: int = 0 if dy != 1 else TILE_SIZE - 8
-					var end_px: int = TILE_SIZE if dx != -1 else 8
-					var end_py: int = TILE_SIZE if dy != -1 else 8
-
-					var neighbor_type: int = _terrain_grid[nx][ny]
-					var blend_color: Color = base_colors[neighbor_type]
-					if current_type == 2:
-						blend_color = C_SAND
-					elif current_type == 3:
-						blend_color = C_ROCK
-
-					for px in range(start_px, end_px):
-						for py in range(start_py, end_py):
-							var dist_to_edge: float = 0.0
-							if dx == -1:
-								dist_to_edge = px / 8.0
-							elif dx == 1:
-								dist_to_edge = (TILE_SIZE - 1 - px) / 8.0
-							if dy == -1:
-								dist_to_edge = max(dist_to_edge, py / 8.0)
-							elif dy == 1:
-								dist_to_edge = max(dist_to_edge, (TILE_SIZE - 1 - py) / 8.0)
-							dist_to_edge = clamp(dist_to_edge, 0.0, 1.0)
-
-							var noise: float = rng.randf_range(-0.3, 0.3)
-							var blend: float = clamp(dist_to_edge + noise, 0.0, 1.0)
-
-							if dist_to_edge < 1.0:
-								var current_color: Color = map_image.get_pixel(tx + px, ty + py)
-								var alpha: float = 1.0 - blend
-								var result: Color = current_color.lerp(blend_color, alpha * 0.5)
-								map_image.set_pixel(tx + px, ty + py, result)
-
-	await get_tree().process_frame
+			var variants: Array = _pixel_tiles.get(tile_type, [])
+			if variants.size() > 0:
+				var idx: int = (x * 7 + y * 13) % variants.size()
+				map_image.blit_rect(variants[idx] as Image, tile_rect, Vector2i(x * TILE_SIZE, y * TILE_SIZE))
+			else:
+				map_image.blit_rect(_generate_tile_texture(tile_type), tile_rect, Vector2i(x * TILE_SIZE, y * TILE_SIZE))
 
 	# === TEXTURATION DES ROUTES (cailloux, traces, bordures) ===
 	for x in range(w):
@@ -763,12 +712,15 @@ func _generate_map_image() -> ImageTexture:
 	
 	await get_tree().process_frame
 	
-	print("✓ Terrain professionnel: ", img_width, "x", img_height, " avec transitions douces, routes texturées, plages et détails de sol")
+	print("✓ Terrain pixel art: ", img_width, "x", img_height, " avec tuiles HoMM3, routes texturées, plages et détails de sol")
 	return ImageTexture.create_from_image(map_image)
 
 func _create_decorations() -> void:
 	# Créer des arbres et rochers sur la carte pour la rendre plus vivante
 	
+	# Les arbres viennent de assets/external/arbre/*.png (sprite sheets avec 2 arbres par image)
+	# Le fallback procédural est supprimé — seules les textures PNG sont utilisées
+
 	# === NOUVEAU SYSTÈME ARBRES : images individuelles avec 2 arbres par image ===
 	# Chaque image fait 224x128 → 2 arbres de 112x128 chacun
 	var tree_files: Array[String] = [
@@ -789,12 +741,6 @@ func _create_decorations() -> void:
 		var tex: Texture2D = load(f)
 		if tex != null:
 			tree_textures.append(tex)
-	var use_procedural: bool = tree_textures.is_empty()
-	if use_procedural:
-		print("⚠ Arbres externes non trouvés, fallback procédural")
-		for c in range(10):
-			tree_textures.append(_sg._generate_sprite("tree", 112, c * 1337))
-	
 	# === CRÉER DES VRAIES FORÊTS ET ARBRES SOLITAIRES ===
 	# Grille pour tracker les positions occupées (éviter les superpositions)
 	var occupied: Dictionary = {}
@@ -947,8 +893,7 @@ func _create_decorations() -> void:
 				
 				_sg._create_elliptical_shadow(tree_node, 28, 10, 8, 0.26)
 				_decorations.append(tree_node)
-	
-	# Créer des rochers (dans la zone colorée 16×9)
+
 	for i in range(ROCK_COUNT):
 		var rock_x: int = rng.randi_range(1, _zone_w - 2)
 		var rock_y: int = rng.randi_range(1, _zone_h - 2)
@@ -967,6 +912,7 @@ func _create_decorations() -> void:
 		rock_sprite.texture = _sg._generate_sprite("rock", 96, rock_x * 1000 + rock_y)
 		rock_sprite.position = Vector2(0, -24)
 		rock_node.add_child(rock_sprite)
+		_apply_outline_shader(rock_sprite, Color(0, 0, 0, 0.65), 1.0, Color(0, 0, 0, 0), 0.0, 0.0)
 
 		# Ombre elliptique sous le rocher
 		_sg._create_elliptical_shadow(rock_node, 28, 10, 8, 0.30)
@@ -992,6 +938,7 @@ func _create_decorations() -> void:
 		tower_sprite.texture = _sg._generate_sprite("tower", 96, tower_x * 1000 + tower_y)
 		tower_sprite.position = Vector2(0, -24)
 		tower_node.add_child(tower_sprite)
+		_apply_outline_shader(tower_sprite, Color(0, 0, 0, 0.7), 1.0, Color(0, 0, 0, 0), 0.0, 0.0)
 		
 		# Ombre elliptique sous la tour
 		_sg._create_elliptical_shadow(tower_node, 48, 14, 16, 0.35)
@@ -1002,40 +949,30 @@ func _create_decorations() -> void:
 
 func _extract_building_texture(sheet_texture: Texture2D, index: int) -> Texture2D:
 	var sheet_img: Image = sheet_texture.get_image()
-	var col: int = index % 4
-	var row: int = index / 4
-	var cell_x: int = col * 256
-	var cell_y: int = row * 341
-
-	# Auto-crop : trouver la boîte englobante des pixels non-transparents
-	var min_x: int = 256
-	var min_y: int = 341
-	var max_x: int = 0
-	var max_y: int = 0
-
-	for y in range(cell_y, cell_y + 341):
-		for x in range(cell_x, cell_x + 256):
-			if sheet_img.get_pixel(x, y).a > 0.02:
-				if x < min_x: min_x = x
-				if y < min_y: min_y = y
-				if x > max_x: max_x = x
-				if y > max_y: max_y = y
-
-	# Fallback si aucun pixel trouvé
-	if max_x == 0:
-		var fb_x: int = cell_x + 6
-		var fb_y: int = cell_y + 6
-		var fb_w: int = 256 - 12
-		var fb_h: int = 341 - 12
-		var fb_img: Image = Image.create(fb_w, fb_h, false, Image.FORMAT_RGBA8)
-		fb_img.blit_rect(sheet_img, Rect2i(fb_x, fb_y, fb_w, fb_h), Vector2i.ZERO)
-		return ImageTexture.create_from_image(fb_img)
-
-	var crop_w: int = max_x - min_x + 1
-	var crop_h: int = max_y - min_y + 1
-	var trimmed: Image = Image.create(crop_w, crop_h, false, Image.FORMAT_RGBA8)
-	trimmed.blit_rect(sheet_img, Rect2i(min_x, min_y, crop_w, crop_h), Vector2i.ZERO)
-	return ImageTexture.create_from_image(trimmed)
+	
+	# Bounding boxes précises des 12 sprites dans bat.png (1024x1024)
+	# Déterminées par analyse pixel-parfaite des zones non-transparentes
+	const BOXES: Array = [
+		Rect2i(59, 32, 394, 251),    # 0: Grand bâtiment principal (château)
+		Rect2i(511, 46, 162, 138),   # 1: Petit bâtiment/tour
+		Rect2i(767, 47, 162, 202),   # 2: Bâtiment moyen
+		Rect2i(528, 256, 128, 188),  # 3: Bâtiment
+		Rect2i(766, 268, 164, 173),  # 4: Bâtiment
+		Rect2i(259, 320, 208, 346),  # 5: Grand bâtiment
+		Rect2i(69, 347, 144, 189),   # 6: Bâtiment
+		Rect2i(529, 478, 126, 188),  # 7: Bâtiment
+		Rect2i(767, 492, 162, 202),  # 8: Bâtiment
+		Rect2i(34, 693, 220, 107),   # 9: Bannière/décoration longue
+		Rect2i(553, 714, 78, 150),   # 10: Lanterne/statue étroite
+		Rect2i(128, 897, 256, 85),   # 11: Bannière large
+	]
+	
+	var i: int = clampi(index, 0, BOXES.size() - 1)
+	var box: Rect2i = BOXES[i]
+	
+	var cropped: Image = Image.create(box.size.x, box.size.y, false, Image.FORMAT_RGBA8)
+	cropped.blit_rect(sheet_img, box, Vector2i.ZERO)
+	return ImageTexture.create_from_image(cropped)
 
 func _create_building_shadow(parent: Node2D, width: float, height: float, alpha: float = 0.25) -> void:
 	"""Ajoute une ombre portée elliptique sous un bâtiment."""
@@ -1062,10 +999,10 @@ func _create_japanese_decorations() -> void:
 	
 	# Nombre d'éléments japonais
 	const TORII_COUNT: int = 8
-	const SAKURA_COUNT: int = 20
+	const SAKURA_COUNT: int = 6
 	const LANTERN_COUNT: int = 24
 	const SHRINE_COUNT: int = 5
-	const BUILDING_COUNT: int = 14
+	const BUILDING_COUNT: int = 12
 	
 		# === BÂTIMENTS JAPONAIS DU SPRITE SHEET ===
 	if japanese_sheet != null:
@@ -1099,6 +1036,7 @@ func _create_japanese_decorations() -> void:
 			building_sprite.scale = Vector2(1.5, 1.5)
 			building_sprite.position = Vector2(0, -32)
 			building_node.add_child(building_sprite)
+			_apply_outline_shader(building_sprite, Color(0, 0, 0, 0.75), 1.0, Color(1.0, 0.95, 0.7, 0.08), 3.0, 0.06)
 			
 			building_node.set_z_index(-7)
 			_japanese_buildings.append(building_node)
@@ -1124,47 +1062,12 @@ func _create_japanese_decorations() -> void:
 		torii_node.position = Vector2(world_x, world_y)
 		add_child(torii_node)
 		
-		# Piliers rouges
-		var pillar_left: ColorRect = ColorRect.new()
-		pillar_left.size = Vector2(8, 64)
-		pillar_left.position = Vector2(-24, -32)
-		pillar_left.color = Color(0.85, 0.15, 0.15)
-		torii_node.add_child(pillar_left)
+		_create_building_shadow(torii_node, 80, 16, 0.22)
 		
-		var pillar_right: ColorRect = ColorRect.new()
-		pillar_right.size = Vector2(8, 64)
-		pillar_right.position = Vector2(16, -32)
-		pillar_right.color = Color(0.85, 0.15, 0.15)
-		torii_node.add_child(pillar_right)
-		
-		# Poutre horizontale (kasagi)
-		var top_beam: ColorRect = ColorRect.new()
-		top_beam.size = Vector2(72, 8)
-		top_beam.position = Vector2(-36, -40)
-		top_beam.color = Color(0.85, 0.15, 0.15)
-		torii_node.add_child(top_beam)
-		
-		# Poutre secondaire (nuki)
-		var mid_beam: ColorRect = ColorRect.new()
-		mid_beam.size = Vector2(64, 6)
-		mid_beam.position = Vector2(-32, -24)
-		mid_beam.color = Color(0.75, 0.25, 0.15)
-		torii_node.add_child(mid_beam)
-		
-		# Extrémités courbées
-		var curve_left: ColorRect = ColorRect.new()
-		curve_left.size = Vector2(12, 12)
-		curve_left.position = Vector2(-44, -44)
-		curve_left.color = Color(0.85, 0.15, 0.15)
-		curve_left.rotation = -0.3
-		torii_node.add_child(curve_left)
-		
-		var curve_right: ColorRect = ColorRect.new()
-		curve_right.size = Vector2(12, 12)
-		curve_right.position = Vector2(32, -44)
-		curve_right.color = Color(0.85, 0.15, 0.15)
-		curve_right.rotation = 0.3
-		torii_node.add_child(curve_right)
+		var torii_sprite: Sprite2D = Sprite2D.new()
+		torii_sprite.texture = _sg._generate_sprite("torii", 96, i * 7243)
+		torii_sprite.position = Vector2(0, -24)
+		torii_node.add_child(torii_sprite)
 		
 		torii_node.set_z_index(-5)
 	
@@ -1180,29 +1083,12 @@ func _create_japanese_decorations() -> void:
 		sakura_node.position = Vector2(world_x, world_y)
 		add_child(sakura_node)
 		
-		# Tronc
-		var trunk: ColorRect = ColorRect.new()
-		trunk.size = Vector2(12, 40)
-		trunk.position = Vector2(-6, -20)
-		trunk.color = Color(0.45, 0.35, 0.25)
-		sakura_node.add_child(trunk)
+		_create_building_shadow(sakura_node, 52, 14, 0.20)
 		
-		# Couronne de fleurs roses
-		var canopy: ColorRect = ColorRect.new()
-		canopy.size = Vector2(64, 48)
-		canopy.position = Vector2(-32, -56)
-		canopy.color = Color(0.95, 0.75, 0.85)
-		sakura_node.add_child(canopy)
-		
-		# Variations de couleur pour les fleurs
-		for _j in range(15):
-			var fx: int = rng.randi_range(-28, 28)
-			var fy: int = rng.randi_range(-52, -20)
-			var flower: ColorRect = ColorRect.new()
-			flower.size = Vector2(6, 6)
-			flower.position = Vector2(fx, fy)
-			flower.color = Color(1.0, 0.8, 0.9) if rng.randf() > 0.5 else Color(0.9, 0.6, 0.8)
-			sakura_node.add_child(flower)
+		var sakura_sprite: Sprite2D = Sprite2D.new()
+		sakura_sprite.texture = _sg._generate_sprite("sakura", 64, i * 5557)
+		sakura_sprite.position = Vector2(0, -20)
+		sakura_node.add_child(sakura_sprite)
 		
 		sakura_node.set_z_index(-3)
 	
@@ -1218,33 +1104,12 @@ func _create_japanese_decorations() -> void:
 		lantern_node.position = Vector2(world_x, world_y)
 		add_child(lantern_node)
 		
-		# Base
-		var base: ColorRect = ColorRect.new()
-		base.size = Vector2(16, 8)
-		base.position = Vector2(-8, -4)
-		base.color = Color(0.45, 0.45, 0.50)
-		lantern_node.add_child(base)
+		_create_building_shadow(lantern_node, 28, 8, 0.20)
 		
-		# Corps de la lanterne
-		var body: ColorRect = ColorRect.new()
-		body.size = Vector2(12, 16)
-		body.position = Vector2(-6, -20)
-		body.color = Color(0.50, 0.50, 0.55)
-		lantern_node.add_child(body)
-		
-		# Toit
-		var roof: ColorRect = ColorRect.new()
-		roof.size = Vector2(18, 6)
-		roof.position = Vector2(-9, -26)
-		roof.color = Color(0.40, 0.40, 0.45)
-		lantern_node.add_child(roof)
-		
-		# Lumière (jaune pâle)
-		var light: ColorRect = ColorRect.new()
-		light.size = Vector2(8, 10)
-		light.position = Vector2(-4, -17)
-		light.color = Color(1.0, 0.95, 0.7)
-		lantern_node.add_child(light)
+		var lantern_sprite: Sprite2D = Sprite2D.new()
+		lantern_sprite.texture = _sg._generate_sprite("lantern", 64, i * 7919)
+		lantern_sprite.position = Vector2(0, -18)
+		lantern_node.add_child(lantern_sprite)
 		
 		# Halo lumineux (ambiance)
 		var glow_img: Image = Image.create(40, 40, false, Image.FORMAT_RGBA8)
@@ -1277,39 +1142,12 @@ func _create_japanese_decorations() -> void:
 		shrine_node.position = Vector2(world_x, world_y)
 		add_child(shrine_node)
 		
-		# Base en pierre
-		var shrine_base: ColorRect = ColorRect.new()
-		shrine_base.size = Vector2(48, 12)
-		shrine_base.position = Vector2(-24, -6)
-		shrine_base.color = Color(0.55, 0.55, 0.60)
-		shrine_node.add_child(shrine_base)
+		_create_building_shadow(shrine_node, 48, 12, 0.20)
 		
-		# Murs
-		var wall_left: ColorRect = ColorRect.new()
-		wall_left.size = Vector2(8, 24)
-		wall_left.position = Vector2(-20, -30)
-		wall_left.color = Color(0.85, 0.85, 0.80)
-		shrine_node.add_child(wall_left)
-		
-		var wall_right: ColorRect = ColorRect.new()
-		wall_right.size = Vector2(8, 24)
-		wall_right.position = Vector2(12, -30)
-		wall_right.color = Color(0.85, 0.85, 0.80)
-		shrine_node.add_child(wall_right)
-		
-		# Toit
-		var shrine_roof: ColorRect = ColorRect.new()
-		shrine_roof.size = Vector2(56, 10)
-		shrine_roof.position = Vector2(-28, -40)
-		shrine_roof.color = Color(0.65, 0.25, 0.15)
-		shrine_node.add_child(shrine_roof)
-		
-		# Porte
-		var door: ColorRect = ColorRect.new()
-		door.size = Vector2(12, 18)
-		door.position = Vector2(-6, -24)
-		door.color = Color(0.75, 0.35, 0.20)
-		shrine_node.add_child(door)
+		var shrine_sprite: Sprite2D = Sprite2D.new()
+		shrine_sprite.texture = _sg._generate_sprite("shrine", 64, i * 3571)
+		shrine_sprite.position = Vector2(0, -16)
+		shrine_node.add_child(shrine_sprite)
 		
 		shrine_node.set_z_index(-6)
 	
@@ -1494,6 +1332,7 @@ func _create_mountain_sprites() -> void:
 		m_sprite.texture = m_tex
 		m_sprite.position = Vector2(0, -28)
 		mountain_node.add_child(m_sprite)
+		_apply_outline_shader(m_sprite, Color(0, 0, 0, 0.65), 1.0, Color(0, 0, 0, 0), 0.0, 0.0)
 		
 		# Ombre sous la montagne
 		_sg._create_elliptical_shadow(mountain_node, 34, 10, 8, 0.30)
@@ -1550,6 +1389,7 @@ func _create_bridges() -> void:
 					var b_sprite: Sprite2D = Sprite2D.new()
 					b_sprite.texture = b_tex
 					bridge_node.add_child(b_sprite)
+					_apply_outline_shader(b_sprite, Color(0, 0, 0, 0.55), 1.0, Color(0, 0, 0, 0), 0.0, 0.0)
 					_decorations.append(bridge_node)
 				
 				elif has_top_road and has_bottom_road:
@@ -1581,6 +1421,7 @@ func _create_bridges() -> void:
 					var b_sprite: Sprite2D = Sprite2D.new()
 					b_sprite.texture = b_tex
 					bridge_node.add_child(b_sprite)
+					_apply_outline_shader(b_sprite, Color(0, 0, 0, 0.55), 1.0, Color(0, 0, 0, 0), 0.0, 0.0)
 					_decorations.append(bridge_node)
 	
 	# Créer les coffres au trésor
@@ -1599,6 +1440,27 @@ func _create_sky_background() -> void:
 		mat.shader = sky_shader
 		_sky_sprite.material = mat
 	add_child(_sky_sprite)
+
+func _setup_visual_enhancements() -> void:
+	VisualEnhancer.add_world_environment(self)
+	var canvas_layer := CanvasLayer.new()
+	canvas_layer.name = "PostProcessLayer"
+	canvas_layer.layer = 127
+	add_child(canvas_layer)
+	_vignette_overlay = VisualEnhancer.add_vignette_overlay(canvas_layer)
+
+func _apply_outline_shader(sprite: Sprite2D, outline_color: Color = Color(0, 0, 0, 0.85), width: float = 1.0, glow_color: Color = Color(0, 0, 0, 0), glow_width: float = 0.0, glow_intensity: float = 0.0) -> void:
+	var shader := load("res://shaders/sprite_outline.gdshader")
+	if not shader:
+		return
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter("outline_color", outline_color)
+	mat.set_shader_parameter("outline_width", width)
+	mat.set_shader_parameter("glow_color", glow_color)
+	mat.set_shader_parameter("glow_width", glow_width)
+	mat.set_shader_parameter("glow_intensity", glow_intensity)
+	sprite.material = mat
 
 func _generate_sky_image() -> Image:
 	var w := _world_w * TILE_SIZE
@@ -1643,6 +1505,7 @@ func _create_treasures() -> void:
 		chest_sprite.texture = _sg._generate_sprite("chest", 64, chest_x * 1000 + chest_y)
 		chest_sprite.position = Vector2(0, -8)
 		chest_node.add_child(chest_sprite)
+		_apply_outline_shader(chest_sprite, Color(0, 0, 0, 0.8), 1.0, Color(1.0, 0.85, 0.2, 0.25), 4.0, 0.15)
 		
 		# Ombre elliptique sous le coffre
 		_sg._create_elliptical_shadow(chest_node, 36, 12, 8, 0.35)
@@ -1727,10 +1590,50 @@ func _create_hero() -> void:
 	
 	_update_hud_hero_buttons()
 	
-func _create_hero_sprites() -> void:
-	"""Crée le héros avec l'image personnalisée perso.jpg"""
-	var texture: Texture2D = load("res://assets/heroes/perso.jpg")
+	# Créer la caméra centrée sur le héros
+	_camera = Camera2D.new()
+	_camera.position = _hero.position
+	_camera.position_smoothing_enabled = true
+	_camera.position_smoothing_speed = 8.0
+	add_child(_camera)
+	_camera.make_current()
 	
+	var zone_width_pixels: float = _zone_w * TILE_SIZE
+	var zone_height_pixels: float = _zone_h * TILE_SIZE
+	
+	_setup_camera_zoom()
+	
+	print("Caméra centrée sur la zone colorée: ", _camera.position)
+	print("Zone: ", _zone_w, "×", _zone_h, " tuiles (", zone_width_pixels, "×", zone_height_pixels, " pixels)")
+	print("Zoom min: ", _camera_zoom_min, " | défaut: ", _camera_zoom_default)
+	_clamp_camera_to_map()
+	
+	print("Héros créé avec visuel à la position : ", _hero.position)
+	print("Caméra créée pour suivre le héros")
+	
+	# Créer l'indicateur de portée de déplacement
+	_create_movement_indicator()
+	
+func _create_hero_sprites() -> void:
+	"""Crée le héros avec sprite samurai pixel art CC0"""
+	_make_hero_label()
+	
+	# 1. Nouveau sprite samurai CC0 d'OpenGameArt (48x48)
+	var samurai_tex: Texture2D = load("res://assets/heroes/hero_samurai_down.png")
+	if samurai_tex:
+		var spr: Sprite2D = Sprite2D.new()
+		spr.name = "HeroSprite"
+		spr.texture = samurai_tex
+		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		spr.scale = Vector2(1.33, 1.33)
+		spr.position = Vector2(0, -16)
+		_apply_outline_shader(spr, Color(0, 0, 0, 0.8), 1.0, Color(1.0, 0.9, 0.5, 0.4), 4.0, 0.3)
+		_hero.add_child(spr)
+		print("✓ Héros créé avec sprite samurai pixel art CC0")
+		return
+	
+	# 2. Fallback: perso.jpg
+	var texture: Texture2D = load("res://assets/heroes/perso.jpg")
 	if texture:
 		var sprite: Sprite2D = Sprite2D.new()
 		sprite.name = "HeroSprite"
@@ -1741,14 +1644,14 @@ func _create_hero_sprites() -> void:
 		sprite.position = Vector2(0, -target_h / 2)
 		_hero.add_child(sprite)
 		print("✓ Héros créé avec perso.jpg")
-	else:
-		var fallback: Sprite2D = Sprite2D.new()
-		fallback.texture = _sg._generate_sprite("hero", 64, 42)
-		fallback.position = Vector2(0, -16)
-		_hero.add_child(fallback)
-		print("⚠ perso.jpg non trouvé, fallback procédural")
+		return
 	
-	_make_hero_label()
+	# 3. Fallback procédural
+	var fallback: Sprite2D = Sprite2D.new()
+	fallback.texture = _sg._generate_sprite("hero", 64, 42)
+	fallback.position = Vector2(0, -16)
+	_hero.add_child(fallback)
+	print("⚠ Aucun sprite trouvé, fallback procédural")
 	
 	# === HALO LUMINEUX AUTOUR DU HÉROS ===
 	var glow_texture: Image = Image.create(80, 80, false, Image.FORMAT_RGBA8)
@@ -1804,30 +1707,6 @@ func _create_hero_sprites() -> void:
 	hero_hp_fill.size = Vector2(40, 5)
 	hero_hp_fill.color = Color(0.2, 0.7, 0.3)
 	_hero.add_child(hero_hp_fill)
-	
-	# Créer la caméra centrée sur le héros
-	_camera = Camera2D.new()
-	_camera.position = _hero.position
-	_camera.position_smoothing_enabled = true
-	_camera.position_smoothing_speed = 8.0
-	add_child(_camera)
-	_camera.make_current()
-	
-	var zone_width_pixels: float = _zone_w * TILE_SIZE
-	var zone_height_pixels: float = _zone_h * TILE_SIZE
-	
-	_setup_camera_zoom()
-	
-	print("Caméra centrée sur la zone colorée: ", _camera.position)
-	print("Zone: ", _zone_w, "×", _zone_h, " tuiles (", zone_width_pixels, "×", zone_height_pixels, " pixels)")
-	print("Zoom min: ", _camera_zoom_min, " | défaut: ", _camera_zoom_default)
-	_clamp_camera_to_map()
-	
-	print("Héros créé avec visuel à la position : ", _hero.position)
-	print("Caméra créée pour suivre le héros")
-	
-	# Créer l'indicateur de portée de déplacement
-	_create_movement_indicator()
 
 func _make_hero_label() -> void:
 	var hero_label: Label = Label.new()
@@ -1886,6 +1765,7 @@ func _add_hero_sprite(hero_node: Node2D, tint: Color) -> void:
 	sprite.position = Vector2(0, -16)
 	sprite.modulate = tint
 	hero_node.add_child(sprite)
+	_apply_outline_shader(sprite, Color(0, 0, 0, 0.8), 1.0, Color(1.0, 0.9, 0.5, 0.15), 3.0, 0.1)
 
 	var hero_label: Label = Label.new()
 	hero_label.name = "HeroLabel"
@@ -2357,6 +2237,8 @@ func _process(delta: float) -> void:
 		_map_sprite.material.set_shader_parameter("time", _anim_time * 0.5)
 	if _sky_sprite and _sky_sprite.material is ShaderMaterial:
 		_sky_sprite.material.set_shader_parameter("time", _anim_time)
+	if _vignette_overlay:
+		VisualEnhancer.set_vignette_time(_vignette_overlay, _anim_time)
 	
 	if _hero and _camera_follow_hero and _camera:
 		_camera.position = _hero.position
@@ -4282,7 +4164,7 @@ const TOWER_COUNT: int = 16
 const TREASURE_COUNT: int = 20
 const RESOURCE_TYPES: Array = ["gold", "wood", "ore"]
 
-# === CONSTANTES UNITÉS ===
+# === CONSTANTES UNITES ===
 const UNIT_TYPES: Dictionary = {
 	"pikeman": {"name": "Piquier", "hp": 5, "attack": 6, "defense": 6, "cost_g": 40, "magic": 0, "magic_res": 2, "speed": 5},
 	"archer": {"name": "Archer", "hp": 5, "attack": 8, "defense": 5, "cost_g": 60, "magic": 0, "magic_res": 3, "speed": 6},
@@ -4292,7 +4174,7 @@ const UNIT_TYPES: Dictionary = {
 	"angel": {"name": "Ange", "hp": 20, "attack": 22, "defense": 14, "cost_g": 700, "magic": 15, "magic_res": 10, "speed": 9},
 }
 
-# === CONSTANTES BÂTIMENTS ===
+# === CONSTANTES BATIMENTS ===
 const CITY_BUILDINGS: Dictionary = {
 	"town_hall": {"name": "Hôtel de Ville", "cost_g": 500, "cost_w": 5, "cost_o": 5, "effect": "income+750"},
 	"barracks": {"name": "Caserne", "cost_g": 300, "cost_w": 5, "cost_o": 3, "effect": "pikeman"},
@@ -4318,7 +4200,6 @@ const MERCHANT_ITEMS: Dictionary = {
 	"compass": {"name": "Boussole sacrée", "desc": "Révèle le boss le plus proche", "cost": 200, "cost_w": 0, "cost_o": 0, "icon": "🧭", "effect": "compass", "value": 1},
 	"water_amulet": {"name": "Amulette aquatique", "desc": "Marche sur l'eau (5 tours)", "cost": 500, "cost_w": 3, "cost_o": 3, "icon": "🌊", "effect": "water_walk", "value": 5},
 }
-
 func _init_quests() -> void:
 	_quest_progress = {}
 	for q in QUESTS:
@@ -4457,7 +4338,7 @@ func _create_cities() -> void:
 		var is_main_castle: bool = (i == 0)
 		
 		if japanese_sheet != null:
-			var building_index: int = 0 if is_main_castle else (1 if i == 1 else 2)
+			var building_index: int = 0 if is_main_castle else (5 if i == 1 else 2)
 			var building_texture: Texture2D = _extract_building_texture(japanese_sheet, building_index)
 			castle_sprite.texture = building_texture
 			if is_main_castle:
@@ -4492,6 +4373,7 @@ func _create_cities() -> void:
 					castle_sprite.texture = _sg._generate_sprite("castle", 192, i * 1337)
 				castle_sprite.position = Vector2(0, -64)
 		city_node.add_child(castle_sprite)
+		_apply_outline_shader(castle_sprite, Color(0, 0, 0, 0.7), 1.0, Color(1.0, 0.9, 0.5, 0.2), 5.0, 0.12)
 		
 		var chimney_count: int = rng.randi_range(2, 4)
 		if is_main_castle:
@@ -4576,40 +4458,67 @@ func _create_enemies() -> void:
 		enemy_node.position = enemy_pos
 		add_child(enemy_node)
 
-		# Charger un sprite HoMM3 selon le type d'ennemi
-		var enemy_sprites: Array = [
-			"res://assets/units/skeleton.png",
-			"res://assets/units/goblin.png",
-			"res://assets/units/archer.png",
-			"res://assets/units/swordsman.png",
-			"res://assets/units/tengu.png",
-			"res://assets/units/kappa.png",
-			"res://assets/units/ninja.png",
-			"res://assets/units/monk.png",
-		]
-		var sprite_path: String = enemy_sprites[i % enemy_sprites.size()]
-		var texture: Texture2D = load(sprite_path) if ResourceLoader.exists(sprite_path) else null
-		
-		if texture:
-			var sprite: Sprite2D = Sprite2D.new()
-			sprite.texture = texture
-			sprite.scale = Vector2(1.5, 1.5)
-			sprite.position = Vector2(0, -16)
-			enemy_node.add_child(sprite)
-		else:
-			# Fallback : sprite procédural selon le type
-			var enemy_types: Array = ["enemy_skeleton", "enemy_goblin", "enemy_archer", "enemy_swordsman", "enemy_tengu", "enemy_kappa", "enemy_ninja", "enemy_monk"]
-			var sprite_type: String = enemy_types[i % enemy_types.size()]
-			var enemy_sprite: Sprite2D = Sprite2D.new()
-			enemy_sprite.texture = _sg._generate_sprite(sprite_type, 64, i * 7919)
-			enemy_sprite.position = Vector2(0, -16)
-			enemy_node.add_child(enemy_sprite)
-		
+		# Glow rouge autour de l'ennemi
+		var glow_img: Image = Image.create(72, 72, false, Image.FORMAT_RGBA8)
+		glow_img.fill(Color(0, 0, 0, 0))
+		for gx in range(72):
+			for gy in range(72):
+				var gdist: float = sqrt((gx - 36) ** 2 + (gy - 36) ** 2)
+				if gdist < 32:
+					var alpha: float = (1.0 - gdist / 32.0) * 0.22
+					glow_img.set_pixel(gx, gy, Color(0.85, 0.12, 0.12, alpha))
+		var glow_sprite: Sprite2D = Sprite2D.new()
+		glow_sprite.name = "EnemyGlow"
+		glow_sprite.texture = ImageTexture.create_from_image(glow_img)
+		glow_sprite.position = Vector2(0, -16)
+		glow_sprite.set_z_index(-4)
+		enemy_node.add_child(glow_sprite)
+
+		# Sprite procédural japonais en priorité (thème samurai)
+		var enemy_types: Array = ["enemy_skeleton", "enemy_goblin", "enemy_archer", "enemy_swordsman", "enemy_tengu", "enemy_kappa", "enemy_ninja", "enemy_monk"]
+		var sprite_type: String = enemy_types[i % enemy_types.size()]
+		var enemy_sprite: Sprite2D = Sprite2D.new()
+		enemy_sprite.name = "EnemySprite"
+		enemy_sprite.texture = _sg._generate_sprite(sprite_type, 64, i * 7919)
+		enemy_sprite.position = Vector2(0, -16)
+		_apply_outline_shader(enemy_sprite, Color(0, 0, 0, 0.85), 1.5, Color(0.85, 0.15, 0.15, 0.35), 4.0, 0.25)
+		enemy_node.add_child(enemy_sprite)
+
+		# Anneau de sélection avec coins (comme le héros)
+		var selection_ring: ColorRect = ColorRect.new()
+		selection_ring.name = "EnemySelectionRing"
+		selection_ring.size = Vector2(64, 64)
+		selection_ring.position = Vector2(-32, -48)
+		selection_ring.color = Color(0.85, 0.15, 0.15, 0.20)
+		selection_ring.set_z_index(-2)
+		enemy_node.add_child(selection_ring)
+
+		for corner in range(4):
+			var corner_marker: ColorRect = ColorRect.new()
+			corner_marker.size = Vector2(6, 6)
+			var cx: float = -32 if corner % 2 == 0 else 26
+			var cy: float = -48 if corner < 2 else -18
+			corner_marker.position = Vector2(cx, cy)
+			corner_marker.color = Color(0.85, 0.15, 0.15)
+			corner_marker.set_z_index(-1)
+			enemy_node.add_child(corner_marker)
+
+		# Nom de l'ennemi
+		var enemy_label: Label = Label.new()
+		enemy_label.name = "EnemyLabel"
+		enemy_label.text = enemy_data["name"]
+		enemy_label.add_theme_font_size_override("font_size", 8)
+		enemy_label.add_theme_color_override("font_color", Color(0.90, 0.80, 0.80))
+		enemy_label.position = Vector2(-24, 24)
+		enemy_label.size = Vector2(48, 12)
+		enemy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		enemy_node.add_child(enemy_label)
+
 		# HP bar background
 		var enemy_hp_bg: ColorRect = ColorRect.new()
 		enemy_hp_bg.name = "EnemyHPBG"
-		enemy_hp_bg.position = Vector2(-16, 16)
-		enemy_hp_bg.size = Vector2(32, 4)
+		enemy_hp_bg.position = Vector2(-18, 20)
+		enemy_hp_bg.size = Vector2(36, 4)
 		enemy_hp_bg.color = Color(0.08, 0.08, 0.08)
 		enemy_hp_bg.z_index = 5
 		enemy_node.add_child(enemy_hp_bg)
@@ -4617,14 +4526,14 @@ func _create_enemies() -> void:
 		# HP bar fill
 		var enemy_hp_fill: ColorRect = ColorRect.new()
 		enemy_hp_fill.name = "EnemyHPFill"
-		enemy_hp_fill.position = Vector2(-16, 16)
-		enemy_hp_fill.size = Vector2(32, 4)
+		enemy_hp_fill.position = Vector2(-18, 20)
+		enemy_hp_fill.size = Vector2(36, 4)
 		enemy_hp_fill.color = Color(0.7, 0.15, 0.15)
 		enemy_hp_fill.z_index = 6
 		enemy_node.add_child(enemy_hp_fill)
 
 		_enemy_visuals.append(enemy_node)
-		
+
 		print("Ennemi ", i + 1, " créé à la position : ", enemy_pos, " (HP: 50)")
 
 func _create_bosses() -> void:
@@ -4680,6 +4589,7 @@ func _create_bosses() -> void:
 		boss_sprite.scale = Vector2(1.5, 1.5)
 		boss_sprite.position = Vector2(0, -20)
 		boss_node.add_child(boss_sprite)
+		_apply_outline_shader(boss_sprite, Color(0, 0, 0, 0.85), 1.5, Color(0.9, 0.1, 0.1, 0.4), 5.0, 0.25)
 		
 		# Nom du boss
 		var boss_label: Label = Label.new()
@@ -4733,32 +4643,49 @@ func _create_merchants() -> void:
 		node.position = pos
 		add_child(node)
 
+		# Glow violet autour du marchand
+		var glow_img: Image = Image.create(64, 64, false, Image.FORMAT_RGBA8)
+		glow_img.fill(Color(0, 0, 0, 0))
+		for gx in range(64):
+			for gy in range(64):
+				var gdist: float = sqrt((gx - 32) ** 2 + (gy - 32) ** 2)
+				if gdist < 28:
+					var alpha: float = (1.0 - gdist / 28.0) * 0.20
+					glow_img.set_pixel(gx, gy, Color(0.6, 0.35, 0.8, alpha))
+		var glow_sprite: Sprite2D = Sprite2D.new()
+		glow_sprite.name = "MerchantGlow"
+		glow_sprite.texture = ImageTexture.create_from_image(glow_img)
+		glow_sprite.position = Vector2(0, -16)
+		glow_sprite.set_z_index(-3)
+		node.add_child(glow_sprite)
+
+		# Sprite procédural du marchand (64x64)
 		var sprite: Sprite2D = Sprite2D.new()
-		var merchant_img: Image = Image.create(32, 32, false, Image.FORMAT_RGBA8)
-		merchant_img.fill(Color(0, 0, 0, 0))
-		# Robe violette de marchand
-		for px in range(32):
-			for py in range(32):
-				var d: float = sqrt((px - 16)**2 + (py - 16)**2)
-				if d < 14:
-					merchant_img.set_pixel(px, py, Color(0.55, 0.35, 0.65, 1.0))
-				elif d < 16:
-					merchant_img.set_pixel(px, py, Color(0.8, 0.7, 0.3, 1.0))
-		# Chapeau
-		for px in range(8, 24):
-			for py in range(4, 12):
-				merchant_img.set_pixel(px, py, Color(0.4, 0.2, 0.1, 1.0))
-		sprite.texture = ImageTexture.create_from_image(merchant_img)
+		sprite.texture = _sg._generate_sprite("merchant", 64, i * 5557)
 		sprite.position = Vector2(0, -16)
 		node.add_child(sprite)
+		_apply_outline_shader(sprite, Color(0, 0, 0, 0.8), 1.0, Color(0.7, 0.5, 0.8, 0.25), 3.0, 0.1)
 
-		var label: Label = Label.new()
-		label.text = "🏪"
-		label.add_theme_font_size_override("font_size", 12)
-		label.position = Vector2(-8, -28)
-		label.size = Vector2(16, 16)
-		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		node.add_child(label)
+		# Icône boutique au-dessus
+		var shop_icon: Label = Label.new()
+		shop_icon.name = "MerchantIcon"
+		shop_icon.text = "🏪"
+		shop_icon.add_theme_font_size_override("font_size", 14)
+		shop_icon.position = Vector2(-8, -30)
+		shop_icon.size = Vector2(16, 16)
+		shop_icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		node.add_child(shop_icon)
+
+		# Nom du marchand
+		var name_label: Label = Label.new()
+		name_label.name = "MerchantLabel"
+		name_label.text = merchant_names[i % merchant_names.size()]
+		name_label.add_theme_font_size_override("font_size", 8)
+		name_label.add_theme_color_override("font_color", Color(0.85, 0.75, 0.90))
+		name_label.position = Vector2(-30, 24)
+		name_label.size = Vector2(60, 12)
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		node.add_child(name_label)
 
 		_merchant_visuals.append(node)
 		print("Marchand créé : ", merchant_names[i % merchant_names.size()], " à (", mx, ",", my, ")")
@@ -4842,6 +4769,7 @@ func _create_resources() -> void:
 		res_sprite.texture = _sg._generate_sprite(sprite_type, 96, i * 3571)
 		res_sprite.position = Vector2(0, -24)
 		res_node.add_child(res_sprite)
+		_apply_outline_shader(res_sprite, Color(0, 0, 0, 0.75), 1.0, Color(1.0, 0.9, 0.5, 0.1), 3.0, 0.06)
 		
 		# Ombre elliptique sous la ressource
 		_sg._create_elliptical_shadow(res_node, 44, 14, 14, 0.30)
