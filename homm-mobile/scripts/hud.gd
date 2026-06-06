@@ -788,6 +788,31 @@ func _show_pause_menu() -> void:
 
 	vbox.add_child(_make_spacer(4))
 
+	var llm_row := HBoxContainer.new()
+	llm_row.custom_minimum_size = Vector2(280, 40)
+	llm_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var llm_label := Label.new()
+	llm_label.text = "Utilisation de l'IA"
+	llm_label.add_theme_color_override("font_color", Color(0.95, 0.9, 0.8))
+	llm_label.add_theme_font_size_override("font_size", 16)
+	llm_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	llm_row.add_child(llm_label)
+
+	var llm_cfg := LLMConfig.new()
+	llm_cfg.load_from_disk()
+	var llm_check := CheckBox.new()
+	llm_check.button_pressed = llm_cfg.enabled
+	llm_check.toggled.connect(func(checked: bool):
+		llm_cfg.enabled = checked
+		llm_cfg.save()
+	)
+	llm_row.add_child(llm_check)
+
+	vbox.add_child(llm_row)
+
+	vbox.add_child(_make_spacer(4))
+
 	var vol_label := Label.new()
 	vol_label.text = "Volume Musique"
 	vol_label.add_theme_color_override("font_color", Color(0.9, 0.85, 0.75))
@@ -834,6 +859,7 @@ func _hide_pause_menu() -> void:
 		_pause_layer = null
 	_pause_active = false
 	pause_state_changed.emit(false)
+
 
 func _get_bgm_volume() -> float:
 	var bgm = get_node_or_null("/root/RetroBGM")

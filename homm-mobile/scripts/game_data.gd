@@ -55,6 +55,12 @@ var buildings: Array[Building] = []
 var bosses_defeated: int = 0
 var unlocked_heroes: Array = []  # list of additional hero names/ids available in combat
 
+# LLM / Player history tracking
+var enemies_killed: int = 0
+var enemies_spared: int = 0
+var quests_completed: int = 0
+var recent_actions: Array[String] = []
+
 var creatures_on_tile: Dictionary = {}   # clé = Vector2i, valeur = Creature
 
 
@@ -107,7 +113,10 @@ func save_game() -> void:
 		"heroes": [],
 		"cities": [],
 		"buildings": [],
-		"creatures_on_tile": []
+		"creatures_on_tile": [],
+		"enemies_killed": enemies_killed,
+		"enemies_spared": enemies_spared,
+		"recent_actions": recent_actions.duplicate()
 	}
 	for h in heroes:
 		data["heroes"].append({
@@ -164,6 +173,12 @@ func load_game() -> void:
 	var data = result.result
 	hero_name = data.get("player_name", "Samurai")
 	difficulty = data.get("difficulty", 0)
+	enemies_killed = data.get("enemies_killed", 0)
+	enemies_spared = data.get("enemies_spared", 0)
+	var loaded_actions: Array = data.get("recent_actions", [])
+	recent_actions.clear()
+	for a in loaded_actions:
+		recent_actions.append(str(a))
 	heroes.clear()
 	for h_data in data.get("heroes", []):
 		var h = Hero.new()
@@ -203,6 +218,28 @@ func load_game() -> void:
 		creature.name = c_data.get("name", "")
 		creature.amount = c_data.get("amount", 0)
 		creatures_on_tile[tile_pos] = creature
+
+func track_action(action_text: String) -> void:
+	recent_actions.append(action_text)
+	if recent_actions.size() > 20:
+		recent_actions.pop_front()
+
+
+func get_player_history_dict(hero_level: int = 1, hero_hp: int = 50, hero_attack: int = 10, hero_defense: int = 5, gold: int = 0) -> Dictionary:
+	return {
+		"hero_name": hero_name,
+		"enemies_killed": enemies_killed,
+		"enemies_spared": enemies_spared,
+		"bosses_defeated": bosses_defeated,
+		"hero_level": hero_level,
+		"hero_hp": hero_hp,
+		"hero_attack": hero_attack,
+		"hero_defense": hero_defense,
+		"gold": gold,
+		"quests_completed": quests_completed,
+		"recent_actions": recent_actions.duplicate(),
+	}
+
 
 func _ready() -> void:
 	if should_load_save:

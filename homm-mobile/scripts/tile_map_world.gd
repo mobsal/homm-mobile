@@ -121,6 +121,9 @@ func _async_init() -> void:
 	_combat_manager.combat_fled.connect(_on_combat_fled)
 	_combat_manager.combat_ended.connect(_on_combat_ended)
 	add_child(_combat_manager)
+	
+	_llm_client = LLMClient.new()
+	add_child(_llm_client)
 	print("✓ Combat Manager initialisé")
 
 	if GameData.should_load_save:
@@ -1898,6 +1901,9 @@ func _input(event: InputEvent) -> void:
 	if _pause_active:
 		return
 
+	if _llm_dialogue_screen or _fallback_dialogue_overlay:
+		return
+
 	if _is_pathfinding:
 		return
 
@@ -2059,7 +2065,7 @@ func _handle_tap(screen_pos: Vector2) -> void:
 		if tile == boss_tile and _bosses[bi].get("alive", true):
 			var dist: int = absi(hero_tile.x - tile.x) + absi(hero_tile.y - tile.y)
 			if dist <= 1:
-				_start_boss_fight(bi)
+				_start_enemy_dialogue(bi, true)
 			else:
 				_create_floating_text("Approchez-vous du boss !", Color(0.9, 0.2, 0.2), _hero.position)
 			return
@@ -2073,7 +2079,8 @@ func _handle_tap(screen_pos: Vector2) -> void:
 		if tile == enemy_tile and _enemies[ei].get("alive", true):
 			var dist: int = absi(hero_tile.x - tile.x) + absi(hero_tile.y - tile.y)
 			if dist <= 1:
-				_start_combat(ei)
+				_create_floating_text("🗣 Dialogue...", Color(0.3, 1.0, 0.3), _hero.position)
+				_start_enemy_dialogue(ei)
 			else:
 				_create_floating_text("Approchez-vous de l'ennemi !", Color(0.9, 0.2, 0.2), _hero.position)
 			return
@@ -2670,6 +2677,7 @@ func _check_resource_collection() -> void:
 					_create_floating_text("+10 💎", Color(0.75, 0.75, 0.85), _hero.position)
 			
 			_update_resource_labels()
+			GameData.track_action("A collecté " + res_type + " (" + res_name + ")")
 			res_data["collected"] = true
 			var burst_color: Color = Color(1.0, 0.85, 0.2) if res_type == "gold" else (Color(0.6, 0.9, 0.4) if res_type == "wood" else Color(0.75, 0.75, 0.85))
 			_spawn_burst_particles(res_pos, burst_color, 8)
@@ -2695,6 +2703,7 @@ func _check_treasure_collection() -> void:
 		var xp_gain: int = chest_data.get("xp_reward", XP_OPEN_TREASURE)
 		_gold += gold_gain
 		_update_resource_labels()
+		GameData.track_action("A ouvert un coffre (+" + str(gold_gain) + " or)")
 		_create_floating_text("+" + str(gold_gain) + " 🪙", Color(1.0, 0.85, 0.2), _hero.position)
 		_spawn_burst_particles(chest_data["position"], Color(1.0, 0.85, 0.2), 10)
 		_gain_xp(xp_gain)
@@ -2850,9 +2859,9 @@ func _build_hero_combat_units() -> Array:
 	}]
 
 func _on_wanderer_clicked(index: int) -> void:
-	if _in_combat:
+	if _in_combat or _llm_dialogue_screen:
 		return
-	_start_combat(index)
+	_start_enemy_dialogue(index)
 
 func _start_combat(enemy_index: int) -> void:
 	if _in_combat:
@@ -3068,6 +3077,310 @@ func _on_combat_fled() -> void:
 	print("🏃 Fuite reussie !")
 	_in_combat = false
 	_in_boss_fight = false
+
+
+# ---------------------------------------------------------------
+# Dialogue LLM avec les ennemis
+# ---------------------------------------------------------------
+
+func _start_enemy_dialogue(enemy_index: int, is_boss: bool = false) -> void:
+	if _in_combat or _llm_dialogue_screen:
+		return
+
+	var map_enemy: Dictionary
+	var is_boss_actual: bool = is_boss
+	if is_boss_actual:
+		map_enemy = _bosses[enemy_index] if enemy_index < _bosses.size() else {}
+	else:
+		map_enemy = _enemies[enemy_index] if enemy_index < _enemies.size() else {}
+
+	if not map_enemy.get("alive", true):
+		return
+
+	_current_enemy_index = enemy_index
+	_current_boss_index = enemy_index if is_boss_actual else -1
+
+	if not _llm_client or not _llm_client.is_ready():
+		_create_floating_text("⚠ Dialogue simplifié", Color(0.9, 0.9, 0.3), _hero.position)
+		_start_fallback_dialogue(map_enemy, enemy_index, is_boss_actual)
+		return
+
+	var personalities = preload("res://scripts/llm/llm_enemy_personalities.gd")
+	var personality: Dictionary = personalities.get_personality(enemy_index, map_enemy.get("name", "Ennemi"))
+
+	var player_history := GameData.get_player_history_dict(
+		_hero_level, _hero_hp, _hero_attack, _hero_defense, _gold
+	)
+
+	_llm_dialogue_screen = LLMDialogueScreen.new()
+	_llm_dialogue_screen.dialogue_ended.connect(_on_dialogue_ended)
+	add_child(_llm_dialogue_screen)
+
+	_llm_dialogue_screen.start_dialogue(map_enemy, personality, player_history, _llm_client)
+
+
+func _make_fallback_choice(action: String, overlay: Panel, map_enemy: Dictionary, is_boss: bool, flee_chance: int, help_chance: int) -> Callable:
+	return func():
+		var outcome_action: String = action
+		var roll: int = rng.randi_range(0, 100)
+
+		if action == "flee" and roll > flee_chance:
+			outcome_action = "attack"
+		elif action == "help" and roll > help_chance:
+			outcome_action = "attack"
+
+		_overlay_dialogue_close(overlay)
+		_on_dialogue_ended({
+			"action": outcome_action,
+			"enemy_data": map_enemy,
+			"is_boss": is_boss,
+		})
+
+
+func _start_fallback_dialogue(map_enemy: Dictionary, enemy_index: int, is_boss: bool) -> void:
+	print("⚠ LLM non configuré — dialogue simplifié")
+	var enemy_name: String = map_enemy.get("name", "Ennemi")
+
+	var screen_size := get_viewport().get_visible_rect().size
+	var margin := screen_size.x * 0.05
+
+	var layer := CanvasLayer.new()
+	layer.layer = 30
+	add_child(layer)
+
+	var overlay := Panel.new()
+	overlay.position = Vector2.ZERO
+	overlay.size = screen_size
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.05, 0.1, 0.92)
+	overlay.add_theme_stylebox_override("panel", style)
+	layer.add_child(overlay)
+
+	var title := Label.new()
+	title.text = "🗣 " + enemy_name
+	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	title.position = Vector2(margin, 40)
+	title.size = Vector2(screen_size.x - margin * 2, 40)
+	overlay.add_child(title)
+
+	var mood_options := [
+		"agressif",
+		"méfiant",
+		"neutre",
+		"amical",
+		"effrayé",
+	]
+	var mood: String = mood_options[enemy_index % mood_options.size()]
+	var subtitle := Label.new()
+	subtitle.text = "Humeur : " + mood
+	subtitle.add_theme_font_size_override("font_size", 16)
+	subtitle.add_theme_color_override("font_color", Color(0.7, 0.7, 0.8))
+	subtitle.position = Vector2(margin, 76)
+	subtitle.size = Vector2(screen_size.x - margin * 2, 28)
+	overlay.add_child(subtitle)
+
+	var dialog_text := Label.new()
+	dialog_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dialog_text.add_theme_font_size_override("font_size", 18)
+	dialog_text.add_theme_color_override("font_color", Color(1, 0.95, 0.85))
+	dialog_text.position = Vector2(margin, 120)
+	dialog_text.size = Vector2(screen_size.x - margin * 2, screen_size.y - 320)
+	overlay.add_child(dialog_text)
+
+	var greetings := [
+		"Que fais-tu sur mes terres, voyageur ?",
+		"Encore un intrus... Que veux-tu ?",
+		"Oh, un visiteur ! Je ne vais pas te manger... peut-être.",
+		"Tu as du courage pour venir jusqu'ici.",
+		"S-s'il te plaît, ne me fais pas de mal...",
+	]
+	dialog_text.text = greetings[enemy_index % greetings.size()]
+
+	var choices_container := VBoxContainer.new()
+	choices_container.position = Vector2(margin, screen_size.y - 180)
+	choices_container.size = Vector2(screen_size.x - margin * 2, 130)
+	overlay.add_child(choices_container)
+
+	var btn_style := StyleBoxFlat.new()
+	btn_style.bg_color = Color(0.2, 0.25, 0.35)
+	btn_style.corner_radius_top_left = 6
+	btn_style.corner_radius_top_right = 6
+	btn_style.corner_radius_bottom_left = 6
+	btn_style.corner_radius_bottom_right = 6
+
+	var heroes_killed: int = GameData.enemies_killed
+	var heroes_spared: int = GameData.enemies_spared
+
+	var choices := [
+		{
+			"text": "😤 \"Dégage de mon chemin ou je te réduis en miettes !\"",
+			"action": "attack",
+		},
+		{
+			"text": "🤝 \"Je ne cherche pas la bagarre. Laissons-nous passer.\"",
+			"action": "flee",
+		},
+		{
+			"text": "💰 \"J'ai de l'or. Peut-être qu'on peut s'arranger ?\"",
+			"action": "help",
+		},
+	]
+
+	# Ajuster les chances selon l'historique
+	var aggression_bonus: int = heroes_killed - heroes_spared * 2
+	var flee_chance: int = 40 - aggression_bonus * 5
+	var help_chance: int = 20 + heroes_spared * 5 - heroes_killed * 3
+	var attack_chance: int = 40 + aggression_bonus * 5
+
+	attack_chance = clampi(attack_chance, 10, 80)
+	flee_chance = clampi(flee_chance, 10, 60)
+	help_chance = clampi(help_chance, 5, 50)
+
+	for c in choices:
+		var btn := Button.new()
+		btn.text = c.text
+		btn.custom_minimum_size = Vector2(0, 38)
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.add_theme_font_size_override("font_size", 14)
+		btn.add_theme_stylebox_override("normal", btn_style)
+		btn.pressed.connect(_make_fallback_choice(c.action, overlay, map_enemy, is_boss, flee_chance, help_chance))
+		choices_container.add_child(btn)
+
+	var close_btn := Button.new()
+	close_btn.text = "✕ Fermer (attaquer)"
+	close_btn.custom_minimum_size = Vector2(0, 32)
+	close_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	close_btn.add_theme_font_size_override("font_size", 13)
+	close_btn.add_theme_color_override("font_color", Color(0.8, 0.5, 0.5))
+	close_btn.pressed.connect(func():
+		_overlay_dialogue_close(overlay)
+		_on_dialogue_ended({
+			"action": "attack",
+			"enemy_data": map_enemy,
+			"is_boss": is_boss,
+		})
+	)
+	overlay.add_child(close_btn)
+	close_btn.position = Vector2(screen_size.x - margin - 180, 8)
+	close_btn.size = Vector2(170, 32)
+
+	_fallback_dialogue_overlay = overlay
+
+
+func _overlay_dialogue_close(overlay: Panel) -> void:
+	if overlay and is_instance_valid(overlay):
+		var parent = overlay.get_parent()
+		if parent and is_instance_valid(parent):
+			parent.queue_free()
+		else:
+			overlay.queue_free()
+	_fallback_dialogue_overlay = null
+
+
+func _on_dialogue_ended(outcome: Dictionary) -> void:
+	var action: String = outcome.get("action", "attack")
+	var enemy_index: int = _current_enemy_index
+	var is_boss: bool = outcome.get("is_boss", false) or _current_boss_index >= 0
+
+	_cleanup_dialogue()
+
+	if _in_combat:
+		return
+
+	match action:
+		"attack":
+			print("⚔️ Dialogue → COMBAT !")
+			GameData.track_action("A combattu " + ("un boss" if is_boss else "un ennemi"))
+			if is_boss:
+				_start_boss_fight(enemy_index)
+			else:
+				GameData.enemies_killed += 1
+				_start_combat(enemy_index)
+
+		"flee":
+			print("🏃 Dialogue → l'ennemi fuit !")
+			GameData.enemies_spared += 1
+			GameData.track_action("A épargné " + ("un boss" if is_boss else "un ennemi") + " qui a fui")
+			if is_boss:
+				_resolve_boss_defeated(enemy_index, 0, 0)
+			else:
+				_resolve_enemy_defeated(enemy_index, 0, 0)
+
+		"help":
+			print("⭐ Dialogue → l'ennemi aide !")
+			GameData.enemies_spared += 1
+			GameData.track_action("Un " + ("boss" if is_boss else "ennemi") + " a offert son aide")
+			var bonus_gold: int = rng.randi_range(10, 40) * (3 if is_boss else 1)
+			var bonus_xp: int = rng.randi_range(10, 30) * (3 if is_boss else 1)
+			_gold += bonus_gold
+			_update_resource_labels()
+			_create_floating_text("+" + str(bonus_gold) + " 🪙 Aide!", Color(0.3, 1.0, 0.3), _hero.position)
+			_gain_xp(bonus_xp)
+			if is_boss:
+				_resolve_boss_defeated(enemy_index, bonus_gold, bonus_xp)
+			else:
+				_resolve_enemy_defeated(enemy_index, bonus_gold, bonus_xp)
+
+		_:
+			print("⚔️ Dialogue → issue inconnue, combat par défaut")
+			if is_boss:
+				_start_boss_fight(enemy_index)
+			else:
+				GameData.enemies_killed += 1
+				_start_combat(enemy_index)
+
+
+func _cleanup_dialogue() -> void:
+	if _llm_dialogue_screen:
+		if _llm_dialogue_screen.dialogue_ended.is_connected(_on_dialogue_ended):
+			_llm_dialogue_screen.dialogue_ended.disconnect(_on_dialogue_ended)
+		_llm_dialogue_screen.queue_free()
+		_llm_dialogue_screen = null
+	if _fallback_dialogue_overlay:
+		_overlay_dialogue_close(_fallback_dialogue_overlay)
+
+
+func _resolve_enemy_defeated(enemy_index: int, extra_gold: int, extra_xp: int) -> void:
+	if enemy_index < 0 or enemy_index >= _enemies.size():
+		return
+
+	var enemy_data: Dictionary = _enemies[enemy_index]
+	enemy_data["alive"] = false
+
+	_create_floating_text("☠️ Disparu!", Color(0.7, 0.7, 0.7), enemy_data["position"] - Vector2(0, 30))
+
+	if enemy_index < _enemy_visuals.size():
+		var enemy_node: Node2D = _enemy_visuals[enemy_index]
+		var dt := create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+		dt.tween_property(enemy_node, "scale", Vector2(1.5, 1.5), 0.3)
+		dt.parallel().tween_property(enemy_node, "modulate:a", 0.0, 0.3)
+		dt.tween_callback(func(): enemy_node.visible = false)
+
+	_refresh_minimap()
+
+
+func _resolve_boss_defeated(boss_index: int, extra_gold: int, extra_xp: int) -> void:
+	if boss_index < 0 or boss_index >= _bosses.size():
+		return
+
+	var boss_data: Dictionary = _bosses[boss_index]
+	boss_data["alive"] = false
+
+	_create_floating_text("💀 Boss vaincu !", Color(1, 0.6, 0), boss_data["position"] - Vector2(0, 30))
+
+	var hero_unlock: Dictionary = boss_data.get("hero_unlock", {})
+	if not hero_unlock.is_empty():
+		var hero_name: String = hero_unlock.get("name", "")
+		if not hero_name.is_empty() and not GameData.unlocked_heroes.has(hero_name):
+			GameData.unlocked_heroes.append(hero_name)
+			_create_floating_text("⭐ " + hero_name + " débloqué !", Color(0.4, 1.0, 0.4), boss_data["position"] - Vector2(0, 60))
+
+	GameData.bosses_defeated += 1
+
+	_refresh_minimap()
+
 
 func _on_surrender_pressed() -> void:
 	_trigger_game_over(false, "Vous avez abandonné la campagne.")
@@ -4055,6 +4368,11 @@ var _combat_manager: CanvasLayer = null
 var _current_enemy_index: int = -1
 var _current_boss_index: int = -1
 var _in_boss_fight: bool = false
+
+# LLM / Dialogue system
+var _llm_client: LLMClient = null
+var _llm_dialogue_screen: LLMDialogueScreen = null
+var _fallback_dialogue_overlay: Panel = null
 var _town_overlay: Panel = null
 var _town_title_label: Label = null
 var _town_res_label: Label = null
@@ -4220,6 +4538,7 @@ func _complete_quest(q: Dictionary) -> void:
 	if q["id"] in _quest_completed:
 		return
 	_quest_completed.append(q["id"])
+	GameData.quests_completed = _quest_completed.size()
 	_gold += q["reward_gold"]
 	_gain_xp(q["reward_xp"])
 	var msg: String = "Quete terminee: %s! +%d or, +%d XP" % [q["title"], q["reward_gold"], q["reward_xp"]]
@@ -5582,6 +5901,7 @@ func _load_game() -> void:
 	_visited_cities = data.get("visited_cities", {})
 	_quest_progress = data.get("quest_progress", {})
 	_quest_completed = data.get("quest_completed", [])
+	GameData.quests_completed = _quest_completed.size()
 	
 	var loaded_cities = data.get("cities_data", [])
 	for i in range(loaded_cities.size()):
