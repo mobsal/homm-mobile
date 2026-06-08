@@ -1,6 +1,9 @@
 extends Node
 ## LlamaServer — Manages the lifecycle of the embedded llama.cpp HTTP server.
 ##
+## NOTE: This script is an autoload singleton. Do NOT rename or add class_name.
+##       The global is accessed as `LlamaServer` (the autoload name).
+##
 ## Architecture:
 ##   - On Android: downloads the GGUF model on first launch (from HuggingFace
 ##     or a configured mirror), caches it in user://, then launches llama-server
@@ -14,8 +17,6 @@ extends Node
 ##   - server_started(port) — llama-server is running
 ##   - server_stopped
 ##   - server_error(message)
-
-class_name LlamaServer
 
 # ── Signals ────────────────────────────────────────────────────────────
 signal download_progress(bytes_received: int, total_bytes: int)
@@ -89,7 +90,7 @@ func _check_for_updates() -> void:
 	if FileAccess.file_exists(version_path):
 		var f := FileAccess.open(version_path, FileAccess.READ)
 		if f:
-			var data := JSON.parse_string(f.get_as_text())
+			var data: Variant = JSON.parse_string(f.get_as_text())
 			f.close()
 			if data is Dictionary:
 				_cached_version = data.get("version", "")
@@ -114,7 +115,7 @@ func _on_version_response(result: int, code: int, _headers: Array, body: PackedB
 		return
 
 	var json_str := body.get_string_from_utf8()
-	var data := JSON.parse_string(json_str)
+	var data: Variant = JSON.parse_string(json_str)
 	if data is Dictionary:
 		_remote_version = data.get("version", "")
 
