@@ -53,6 +53,22 @@ const COLOR_DARK_BG := Color(0.04, 0.03, 0.02)
 const COLOR_ACCENT := Color(0.35, 0.28, 0.18)
 
 func _ready() -> void:
+	_setup_fonts()
+	
+	RetroBGM.play_menu()
+	
+	# Check for embedded LLM model download on Android
+	_check_llm_model()
+	
+	# Fond procédural japonais
+	_create_japanese_background()
+	_add_fog_overlay()
+	_setup_visual_enhancements()
+
+	_build_ui()
+	_animate_entrance()
+
+func _setup_fonts() -> void:
 	var custom_font: FontFile = DOTGOTHIC_FONT
 	if custom_font:
 		custom_font.hinting = TextServer.HINTING_NONE
@@ -68,14 +84,45 @@ func _ready() -> void:
 		print("⚠ ÉCHEC chargement DotGothic16")
 
 	print("  ThemeDB.fallback_font = ", ThemeDB.fallback_font)
-	
-	RetroBGM.play_menu()
-	
-	# Fond procédural japonais
-	_create_japanese_background()
-	_add_fog_overlay()
-	_setup_visual_enhancements()
 
+
+func _check_llm_model() -> void:
+	# Only relevant on Android with embedded LlamaServer
+	if not LlamaServer:
+		return
+
+	# If server is already ready, nothing to do
+	if LlamaServer.is_server_ready():
+		return
+
+	# If downloading, show the download screen
+	if LlamaServer.is_downloading():
+		_show_download_screen()
+		return
+
+	# Check if model is cached (server will auto-start in _ready)
+	# If LlamaServer emits download_progress, show the screen
+	LlamaServer.download_progress.connect(_on_llm_download_started)
+
+
+func _on_llm_download_started(_bytes: int, _total: int) -> void:
+	# Disconnect so we only trigger once
+	if LlamaServer.download_progress.is_connected(_on_llm_download_started):
+		LlamaServer.download_progress.disconnect(_on_llm_download_started)
+	_show_download_screen()
+
+
+func _show_download_screen() -> void:
+	var screen := ModelDownloadScreen.new()
+	screen.retry_requested.connect(func():
+		screen.queue_free()
+		if LlamaServer:
+			LlamaServer.force_redownload()
+	)
+	add_child(screen)
+
+
+func _build_ui() -> void:
 	# Titre principal
 	_title_label = Label.new()
 	_title_label.text = "HOMURA"
@@ -180,27 +227,17 @@ func _ready() -> void:
 	version_label.add_theme_color_override("font_color", Color(0.4, 0.4, 0.4))
 	add_child(version_label)
 
-	# Animation d'entrée
+
+func _animate_entrance() -> void:
 	_title_label.modulate.a = 0.0
 	_subtitle_label.modulate.a = 0.0
-	btn_container.modulate.a = 0.0
-	btn_container.scale = Vector2(0.8, 0.8)
 
 	var tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
 	tween.tween_property(_title_label, "modulate:a", 1.0, 0.8).set_delay(0.2)
 	tween.parallel().tween_property(_subtitle_label, "modulate:a", 1.0, 0.8).set_delay(0.4)
-	tween.parallel().tween_property(btn_container, "modulate:a", 1.0, 0.6).set_delay(0.6)
-	tween.parallel().tween_property(btn_container, "scale", Vector2(1.0, 1.0), 0.6).set_delay(0.6)
+
 
 func _process(delta: float) -> void:
-	_anim_time += delta
-	var shimmer: float = (sin(_anim_time * 0.8) + 1.0) * 0.5
-	_title_label.modulate = Color(0.95, 0.80 + shimmer * 0.15, 0.20 + shimmer * 0.1, _title_label.modulate.a)
-	if _fog_overlay and _fog_overlay.material:
-		_fog_overlay.material.set_shader_parameter("time", _anim_time)
-	if _vignette_overlay:
-		VisualEnhancer.set_vignette_time(_vignette_overlay, _anim_time)
-	_spawn_petal()
 	for i in range(_petals.size() - 1, -1, -1):
 		var p = _petals[i]
 		if not is_instance_valid(p):
