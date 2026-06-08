@@ -4,9 +4,9 @@ class_name LLMConfig
 
 const SETTINGS_PATH: String = "user://llm_settings.cfg"
 
-var endpoint: String = "https://ollama.com/v1/chat/completions"
-var api_key: String = "3a704623ac3042bab54f2c9ff8044abd.2qW05jazY9J00R2NwVTE3a_s"
-var model: String = "gemma3:4b"
+var endpoint: String = "http://127.0.0.1:8081/v1/chat/completions"
+var api_key: String = "not-needed"
+var model: String = "qwen2.5-1.5b-instruct"
 var max_tokens: int = 512
 var temperature: float = 0.8
 var enabled: bool = true
@@ -31,4 +31,4 @@ func load_from_disk() -> void:
 
 
 func is_ready() -> bool:
-	return enabled and not api_key.is_empty()
+	return enabled
