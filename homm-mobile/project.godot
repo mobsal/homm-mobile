@@ -24,6 +24,7 @@ GameData="*res://scripts/game_data.gd"
 RetroBGM="*res://scripts/retro_bgm.gd"
 SFX="*res://scripts/sfx_manager.gd"
 LoadingScreen="*res://scripts/loading_screen.gd"
+LlamaServer="*res://scripts/llm/llama_server.gd"
 
 [display]
 

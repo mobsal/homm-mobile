@@ -12,9 +12,16 @@ func _ready() -> void:
 	_config = LLMConfig.new()
 	_config.load_from_disk()
 	_http = HTTPRequest.new()
-	_http.timeout = 30
+	_http.timeout = 45  # longer timeout for embedded LLM
 	_http.request_completed.connect(_on_request_completed)
 	add_child(_http)
+
+
+func get_endpoint() -> String:
+	# Use embedded LlamaServer if available (Android), else config endpoint
+	if LlamaServer and LlamaServer.is_server_ready():
+		return LlamaServer.get_endpoint()
+	return _config.endpoint
 
 
 func set_config(cfg: LLMConfig) -> void:
@@ -26,6 +33,9 @@ func get_config() -> LLMConfig:
 
 
 func is_ready() -> bool:
+	# Ready if LlamaServer is running (embedded) OR LLM config is valid
+	if LlamaServer and LlamaServer.is_server_ready():
+		return true
 	return _config.is_ready()
 
 
@@ -42,12 +52,15 @@ func send_prompt(system_prompt: String, messages: Array[Dictionary]) -> void:
 		"temperature": _config.temperature,
 	}
 	var json_body := JSON.stringify(body)
+	var actual_endpoint := get_endpoint()
+	var actual_api_key := "not-needed" if LlamaServer and LlamaServer.is_server_ready() else _config.api_key
+
 	var headers := [
 		"Content-Type: application/json",
-		"Authorization: Bearer " + _config.api_key,
+		"Authorization: Bearer " + actual_api_key,
 	]
 
-	var err := _http.request(_config.endpoint, headers, HTTPClient.METHOD_POST, json_body)
+	var err := _http.request(actual_endpoint, headers, HTTPClient.METHOD_POST, json_body)
 	if err != OK:
 		push_error("LLMClient: échec de la requête HTTP — ", err)
 		response_received.emit(false, {"error": "Échec de la requête HTTP"})

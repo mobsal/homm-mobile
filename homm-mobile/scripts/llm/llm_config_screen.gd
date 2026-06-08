@@ -59,6 +59,21 @@ func _build_ui() -> void:
 	inner_panel.add_child(label)
 	y += 50
 
+	# Embedded server status bar
+	var embedded_label := Label.new()
+	var status := "Serveur embarqué : non disponible (desktop)"
+	if LlamaServer and LlamaServer.is_server_ready():
+		status = "Serveur embarqué : ACTIF (port %d)" % LlamaServer.SERVER_PORT
+	elif OS.get_name() == "Android":
+		status = "Serveur embarqué : démarrage en cours..."
+	embedded_label.text = status
+	embedded_label.add_theme_font_size_override("font_size", 11)
+	embedded_label.add_theme_color_override("font_color", Color(0.5, 0.8, 0.5))
+	embedded_label.position = Vector2(20, y)
+	embedded_label.size = Vector2(panel_w - 40, 20)
+	inner_panel.add_child(embedded_label)
+	y += 24
+
 	var fields := [
 		["Endpoint API", "endpoint", _config.endpoint],
 		["Clé API", "key", _config.api_key],
